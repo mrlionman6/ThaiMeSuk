@@ -13,7 +13,7 @@ api_key = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 user_input = st.text_input("พิมพ์คำถามเกี่ยวกับการนำเข้า-ส่งออก")
 
 if user_input:
-    with st.spinner("กำลังคิด")ซ
+    with st.spinner("กำลังคิด"):
         response = client.messages.create(
             model = "claude-haiku-4-5-20251001",
             max_tokens=500,
