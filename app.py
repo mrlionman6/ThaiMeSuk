@@ -8,7 +8,7 @@ st.write("ทดสอบเชื่อมต่อ Claude API")
 # api_key = st.text_input("ใส่ Anthropic API Key", type="password")
 
 # api secert
-api_key = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
 user_input = st.text_input("พิมพ์คำถามเกี่ยวกับการนำเข้า-ส่งออก")
 
