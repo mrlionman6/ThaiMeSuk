@@ -1,2 +1,5 @@
 streamlit
 anthropic
+sentence-transformers
+rank_bm25
+pythainlp
