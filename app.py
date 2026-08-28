@@ -8,6 +8,10 @@ import numpy as np
 st.set_page_config(page_title="ผู้ช่วยความรู้กฎหมายเบื้องต้น", page_icon="⚖️")
 st.title("⚖️ ผู้ช่วยความรู้กฎหมายเบื้องต้นแก่ประชาชน")
 
+...
+
+user_input = st.text_input("พิมพ์คำถามเกี่ยวกับกฎหมาย ภาษี ที่ดิน หรือธุรกิจ"
+
 @st.cache_resource
 def load_models():
     embed_model = SentenceTransformer('intfloat/multilingual-e5-large')
