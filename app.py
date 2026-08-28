@@ -55,7 +55,7 @@ def build_index(_embed_model, kb):
     return kb_embeddings, bm25
 
 kb_embeddings, bm25 = build_index(embed_model, knowledge_base)
-
+# Top-K Retrieval 2
 def hybrid_search(query, k=5, alpha=0.5):
     query_embedding = embed_model.encode(query)
     vector_scores = util.cos_sim(query_embedding, kb_embeddings)[0].numpy()
@@ -70,7 +70,7 @@ def hybrid_search(query, k=5, alpha=0.5):
     final_scores = alpha * normalize(vector_scores) + (1 - alpha) * normalize(bm25_scores)
     top_idx = final_scores.argsort()[::-1][:k]
     return [knowledge_base[i] for i in top_idx]
-
+# Top-K Retrieval 1
 def rerank(query, candidates, top_k=3):
     pairs = [[query, c] for c in candidates]
     scores = reranker.predict(pairs)
