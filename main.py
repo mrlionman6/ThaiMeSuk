@@ -24,7 +24,7 @@ print("โหลดโมเดลสำเร็จ")
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "1234")
 
 def require_login(request: Request):
     if not request.session.get("logged_in"):
