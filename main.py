@@ -2,18 +2,20 @@ import json
 import os
 import secrets
 from datetime import datetime
-from fastapi import FastAPI, Depends, HTTPException
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import FastAPI, Depends, HTTPException, Request, Form
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 import anthropic
 from sentence_transformers import SentenceTransformer, CrossEncoder, util
 from rank_bm25 import BM25Okapi
 from pythainlp.tokenize import word_tokenize
 import numpy as np
+from starlette.middleware.sessions import SessionMiddleware
+
 
 app = FastAPI()
+app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SESSION_SECRET", "change-this-secret-key"))
 
 # ---------- โหลดโมเดล ----------
 print("กำลังโหลดโมเดล...")
@@ -24,20 +26,10 @@ print("โหลดโมเดลสำเร็จ")
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 # ---------- Admin Auth ----------
-security = HTTPBasic()
+
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
 
-def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
-    correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
-    if not (correct_username and correct_password):
-        raise HTTPException(
-            status_code=401,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
 
 # ---------- Knowledge Base ----------
 with open("knowledge_base.json", "r", encoding="utf-8") as f:
