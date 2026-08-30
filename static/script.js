@@ -15,7 +15,7 @@ async function askQuestion() {
         const data = await response.json();
 
         document.getElementById("loading").style.display = "none";
-        document.getElementById("answerBox").innerText = data.answer;
+        document.getElementById("answerBox").innerHTML = marked.parse(data.answer);
 
     } catch (error) {
         document.getElementById("loading").style.display = "none";
