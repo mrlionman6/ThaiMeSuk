@@ -30,6 +30,65 @@ client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
 
+def require_login(request: Request):
+    if not request.session.get("logged_in"):
+        raise HTTPException(status_code=401, detail="Not logged in")
+    return True
+
+@app.get("/admin/login")
+def login_page():
+    return FileResponse("static/login.html")
+
+@app.post("/admin/login")
+def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        request.session["logged_in"] = True
+        return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/login?error=1", status_code=303)
+
+@app.get("/admin/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/admin/login", status_code=303)
+
+@app.get("/admin")
+def admin_page(request: Request):
+    if not request.session.get("logged_in"):
+        return RedirectResponse(url="/admin/login")
+    return FileResponse("static/admin.html")
+
+@app.get("/admin/api/logs")
+def get_pending_logs(request: Request, _: bool = Depends(require_login)):
+    logs = load_logs()
+    pending = [l for l in logs if l["status"] == "pending"]
+    return {"logs": pending}
+
+@app.post("/admin/api/approve")
+def approve_log(action: LogAction, request: Request, _: bool = Depends(require_login)):
+    logs = load_logs()
+    for log in logs:
+        if log["id"] == action.log_id:
+            log["status"] = "approved"
+            new_chunk = f"{log['query']} — {log['answer']}"
+            with open("knowledge_base.json", "r", encoding="utf-8") as f:
+                kb = json.load(f)
+            kb.append(new_chunk)
+            with open("knowledge_base.json", "w", encoding="utf-8") as f:
+                json.dump(kb, f, ensure_ascii=False, indent=2)
+            rebuild_index()
+            break
+    save_logs(logs)
+    return {"status": "approved"}
+
+@app.post("/admin/api/reject")
+def reject_log(action: LogAction, request: Request, _: bool = Depends(require_login)):
+    logs = load_logs()
+    for log in logs:
+        if log["id"] == action.log_id:
+            log["status"] = "rejected"
+            break
+    save_logs(logs)
+    return {"status": "rejected"}
 
 # ---------- Knowledge Base ----------
 with open("knowledge_base.json", "r", encoding="utf-8") as f:
