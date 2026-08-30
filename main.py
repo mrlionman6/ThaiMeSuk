@@ -1,9 +1,9 @@
-import os
-import numpy as np
 import json
-import anthropic
-
-from fastapi import FastAPI
+import os
+import secrets
+from datetime import datetime
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -11,11 +11,11 @@ import anthropic
 from sentence_transformers import SentenceTransformer, CrossEncoder, util
 from rank_bm25 import BM25Okapi
 from pythainlp.tokenize import word_tokenize
-
+import numpy as np
 
 app = FastAPI()
 
-# ---------- โหลดโมเดล (ครั้งเดียวตอนเริ่มเซิร์ฟเวอร์) ----------
+# ---------- โหลดโมเดล ----------
 print("กำลังโหลดโมเดล...")
 embed_model = SentenceTransformer('intfloat/multilingual-e5-large')
 reranker = CrossEncoder('cross-encoder/mmarco-mMiniLMv2-L12-H384-v1')
@@ -23,15 +23,68 @@ print("โหลดโมเดลสำเร็จ")
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
+# ---------- Admin Auth ----------
+security = HTTPBasic()
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
+
+def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, ADMIN_USERNAME)
+    correct_password = secrets.compare_digest(credentials.password, ADMIN_PASSWORD)
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
 # ---------- Knowledge Base ----------
 with open("knowledge_base.json", "r", encoding="utf-8") as f:
     knowledge_base = json.load(f)
 
-# ---------- สร้าง Index (Embedding + BM25) ----------
-kb_embeddings = embed_model.encode(knowledge_base)
-tokenized_kb = [word_tokenize(doc, engine="newmm") for doc in knowledge_base]
-bm25 = BM25Okapi(tokenized_kb)
+def build_index():
+    global kb_embeddings, bm25, tokenized_kb
+    kb_embeddings = embed_model.encode(knowledge_base)
+    tokenized_kb = [word_tokenize(doc, engine="newmm") for doc in knowledge_base]
+    bm25 = BM25Okapi(tokenized_kb)
 
+build_index()
+
+def rebuild_index():
+    global knowledge_base
+    with open("knowledge_base.json", "r", encoding="utf-8") as f:
+        knowledge_base = json.load(f)
+    build_index()
+
+# ---------- Log ----------
+LOG_FILE = "low_confidence_log.json"
+
+def load_logs():
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def save_logs(logs):
+    with open(LOG_FILE, "w", encoding="utf-8") as f:
+        json.dump(logs, f, ensure_ascii=False, indent=2)
+
+def log_low_confidence_query(query, answer, top_chunks, max_score):
+    logs = load_logs()
+    logs.append({
+        "id": len(logs),
+        "timestamp": datetime.now().isoformat(),
+        "query": query,
+        "answer": answer,
+        "retrieved_chunks": top_chunks,
+        "max_score": float(max_score),
+        "status": "pending"
+    })
+    save_logs(logs)
+
+# ---------- RAG Pipeline ----------
 def hybrid_search(query, k=5, alpha=0.5):
     query_embedding = embed_model.encode(query)
     vector_scores = util.cos_sim(query_embedding, kb_embeddings)[0].numpy()
@@ -47,15 +100,17 @@ def hybrid_search(query, k=5, alpha=0.5):
     top_idx = final_scores.argsort()[::-1][:k]
     return [knowledge_base[i] for i in top_idx]
 
-def rerank(query, candidates, top_k=3):
+def rerank_with_scores(query, candidates, top_k=3):
     pairs = [[query, c] for c in candidates]
     scores = reranker.predict(pairs)
     ranked = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
-    return [text for text, score in ranked[:top_k]]
+    top_texts = [text for text, score in ranked[:top_k]]
+    top_scores = [float(score) for text, score in ranked[:top_k]]
+    return top_texts, top_scores
 
 def rag_answer(query):
     candidates = hybrid_search(query, k=5)
-    top_chunks = rerank(query, candidates, top_k=3)
+    top_chunks, scores = rerank_with_scores(query, candidates, top_k=3)
     context = "\n".join([f"- {c}" for c in top_chunks])
 
     prompt = "คุณเป็นผู้ช่วยให้ความรู้กฎหมายเบื้องต้นแก่ประชาชนไทย\n\n"
@@ -75,18 +130,65 @@ def rag_answer(query):
         max_tokens=500,
         messages=[{"role": "user", "content": prompt}]
     )
-    return response.content[0].text, top_chunks
+    answer = response.content[0].text
 
-# ---------- API Endpoint ----------
+    CONFIDENCE_THRESHOLD = 0.3
+    if len(scores) == 0 or max(scores) < CONFIDENCE_THRESHOLD:
+        log_low_confidence_query(query, answer, top_chunks, max(scores) if scores else 0)
+
+    return answer, top_chunks
+
+# ---------- User API ----------
 class Question(BaseModel):
     query: str
 
-@app.post("/ask") # ← ต้องตรงกับที่ script.js เรียก fetch("/ask")
+@app.post("/ask")
 def ask_question(question: Question):
     answer, sources = rag_answer(question.query)
     return {"answer": answer, "sources": sources}
 
-# ---------- เสิร์ฟหน้าเว็บ (static files) ----------
+# ---------- Admin API ----------
+@app.get("/admin")
+def admin_page(username: str = Depends(verify_admin)):
+    return FileResponse("static/admin.html")
+
+@app.get("/admin/api/logs")
+def get_pending_logs(username: str = Depends(verify_admin)):
+    logs = load_logs()
+    pending = [l for l in logs if l["status"] == "pending"]
+    return {"logs": pending}
+
+class LogAction(BaseModel):
+    log_id: int
+
+@app.post("/admin/api/approve")
+def approve_log(action: LogAction, username: str = Depends(verify_admin)):
+    logs = load_logs()
+    for log in logs:
+        if log["id"] == action.log_id:
+            log["status"] = "approved"
+            new_chunk = f"{log['query']} — {log['answer']}"
+            with open("knowledge_base.json", "r", encoding="utf-8") as f:
+                kb = json.load(f)
+            kb.append(new_chunk)
+            with open("knowledge_base.json", "w", encoding="utf-8") as f:
+                json.dump(kb, f, ensure_ascii=False, indent=2)
+            rebuild_index()
+            break
+    save_logs(logs)
+    return {"status": "approved"}
+
+@app.post("/admin/api/reject")
+def reject_log(action: LogAction, username: str = Depends(verify_admin)):
+    logs = load_logs()
+    for log in logs:
+        if log["id"] == action.log_id:
+            log["status"] = "rejected"
+            break
+    save_logs(logs)
+    return {"status": "rejected"}
+
+# ---------- เสิร์ฟหน้าเว็บผู้ใช้ ----------
 @app.get("/")
 def read_root():
     return FileResponse("static/index.html")
