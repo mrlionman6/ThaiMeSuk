@@ -1,1 +1,23 @@
+body {
+    font-family: sans-serif;
+    max-width: 600px;
+    margin: 40px auto;
+    padding: 0 20px;
+}
 
+input {
+    width: 70%;
+    padding: 10px;
+    font-size: 16px;
+}
+
+button {
+    padding: 10px 20px;
+    font-size: 16px;
+}
+
+#answerBox {
+    margin-top: 20px;
+    white-space: pre-wrap;
+    line-height: 1.6;
+}
