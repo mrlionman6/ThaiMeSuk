@@ -1,1 +1,19 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>ผู้ช่วยความรู้กฎหมายเบื้องต้น</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>⚖️ ผู้ช่วยความรู้กฎหมายเบื้องต้น</h1>
 
+    <input type="text" id="questionInput" placeholder="พิมพ์คำถามเกี่ยวกับกฎหมาย ภาษี ที่ดิน หรือธุรกิจ">
+    <button onclick="askQuestion()">ถาม</button>
+
+    <div id="loading" style="display:none;">กำลังคิด...</div>
+    <div id="answerBox"></div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
