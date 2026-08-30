@@ -5,3 +5,4 @@ sentence-transformers
 rank_bm25
 pythainlp
 itsdangerous
+python-multipart
