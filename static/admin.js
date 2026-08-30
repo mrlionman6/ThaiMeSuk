@@ -31,3 +31,14 @@ async function approveLog(id) {
     });
     loadLogs();
 }
+
+async function rejectLog(id) {
+    await fetch("/admin/api/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ log_id: id })
+    });
+    loadLogs();
+}
+
+loadLogs();
