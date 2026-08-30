@@ -21,3 +21,22 @@ button {
     white-space: pre-wrap;
     line-height: 1.6;
 }
+
+#answerBox h1, #answerBox h2, #answerBox h3 {
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+
+#answerBox strong {
+    color: #1a1a1a;
+}
+
+#answerBox hr {
+    margin: 20px 0;
+    border: none;
+    border-top: 1px solid #ddd;
+}
+
+#answerBox ul, #answerBox ol {
+    padding-left: 25px;
+}
