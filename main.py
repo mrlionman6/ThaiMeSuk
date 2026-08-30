@@ -1,6 +1,5 @@
 import json
 import os
-import secrets
 from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, Request, Form
 from fastapi.staticfiles import StaticFiles
@@ -13,7 +12,6 @@ from pythainlp.tokenize import word_tokenize
 import numpy as np
 from starlette.middleware.sessions import SessionMiddleware
 
-
 app = FastAPI()
 app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SESSION_SECRET", "change-this-secret-key"))
 
@@ -25,8 +23,6 @@ print("โหลดโมเดลสำเร็จ")
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
-# ---------- Admin Auth ----------
-
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "changeme")
 
@@ -35,67 +31,12 @@ def require_login(request: Request):
         raise HTTPException(status_code=401, detail="Not logged in")
     return True
 
-@app.get("/admin/login")
-def login_page():
-    return FileResponse("static/login.html")
-
-@app.post("/admin/login")
-def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-        request.session["logged_in"] = True
-        return RedirectResponse(url="/admin", status_code=303)
-    return RedirectResponse(url="/admin/login?error=1", status_code=303)
-
-@app.get("/admin/logout")
-def logout(request: Request):
-    request.session.clear()
-    return RedirectResponse(url="/admin/login", status_code=303)
-
-@app.get("/admin")
-def admin_page(request: Request):
-    if not request.session.get("logged_in"):
-        return RedirectResponse(url="/admin/login")
-    return FileResponse("static/admin.html")
-
-@app.get("/admin/api/logs")
-def get_pending_logs(request: Request, _: bool = Depends(require_login)):
-    logs = load_logs()
-    pending = [l for l in logs if l["status"] == "pending"]
-    return {"logs": pending}
-
-@app.post("/admin/api/approve")
-def approve_log(action: LogAction, request: Request, _: bool = Depends(require_login)):
-    logs = load_logs()
-    for log in logs:
-        if log["id"] == action.log_id:
-            log["status"] = "approved"
-            new_chunk = f"{log['query']} — {log['answer']}"
-            with open("knowledge_base.json", "r", encoding="utf-8") as f:
-                kb = json.load(f)
-            kb.append(new_chunk)
-            with open("knowledge_base.json", "w", encoding="utf-8") as f:
-                json.dump(kb, f, ensure_ascii=False, indent=2)
-            rebuild_index()
-            break
-    save_logs(logs)
-    return {"status": "approved"}
-
-@app.post("/admin/api/reject")
-def reject_log(action: LogAction, request: Request, _: bool = Depends(require_login)):
-    logs = load_logs()
-    for log in logs:
-        if log["id"] == action.log_id:
-            log["status"] = "rejected"
-            break
-    save_logs(logs)
-    return {"status": "rejected"}
-
 # ---------- Knowledge Base ----------
 with open("knowledge_base.json", "r", encoding="utf-8") as f:
     knowledge_base = json.load(f)
 
 def build_index():
-    global kb_embeddings, bm25, tokenized_kb
+    global kb_embeddings, bm25
     kb_embeddings = embed_model.encode(knowledge_base)
     tokenized_kb = [word_tokenize(doc, engine="newmm") for doc in knowledge_base]
     bm25 = BM25Okapi(tokenized_kb)
@@ -189,31 +130,51 @@ def rag_answer(query):
 
     return answer, top_chunks
 
-# ---------- User API ----------
+# ---------- Pydantic Models (ต้องประกาศก่อนใช้งานด้านล่าง) ----------
 class Question(BaseModel):
     query: str
 
+class LogAction(BaseModel):
+    log_id: int
+
+# ---------- User API ----------
 @app.post("/ask")
 def ask_question(question: Question):
     answer, sources = rag_answer(question.query)
     return {"answer": answer, "sources": sources}
 
-# ---------- Admin API ----------
+# ---------- Admin Login/Logout ----------
+@app.get("/admin/login")
+def login_page():
+    return FileResponse("static/login.html")
+
+@app.post("/admin/login")
+def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        request.session["logged_in"] = True
+        return RedirectResponse(url="/admin", status_code=303)
+    return RedirectResponse(url="/admin/login?error=1", status_code=303)
+
+@app.get("/admin/logout")
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/admin/login", status_code=303)
+
+# ---------- Admin Page & API ----------
 @app.get("/admin")
-def admin_page(username: str = Depends(verify_admin)):
+def admin_page(request: Request):
+    if not request.session.get("logged_in"):
+        return RedirectResponse(url="/admin/login")
     return FileResponse("static/admin.html")
 
 @app.get("/admin/api/logs")
-def get_pending_logs(username: str = Depends(verify_admin)):
+def get_pending_logs(_: bool = Depends(require_login)):
     logs = load_logs()
     pending = [l for l in logs if l["status"] == "pending"]
     return {"logs": pending}
 
-class LogAction(BaseModel):
-    log_id: int
-
 @app.post("/admin/api/approve")
-def approve_log(action: LogAction, username: str = Depends(verify_admin)):
+def approve_log(action: LogAction, _: bool = Depends(require_login)):
     logs = load_logs()
     for log in logs:
         if log["id"] == action.log_id:
@@ -230,7 +191,7 @@ def approve_log(action: LogAction, username: str = Depends(verify_admin)):
     return {"status": "approved"}
 
 @app.post("/admin/api/reject")
-def reject_log(action: LogAction, username: str = Depends(verify_admin)):
+def reject_log(action: LogAction, _: bool = Depends(require_login)):
     logs = load_logs()
     for log in logs:
         if log["id"] == action.log_id:
