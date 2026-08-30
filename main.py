@@ -81,7 +81,7 @@ def rag_answer(query):
 class Question(BaseModel):
     query: str
 
-@app.post("/ask")
+@app.post("/ask") # ← ต้องตรงกับที่ script.js เรียก fetch("/ask")
 def ask_question(question: Question):
     answer, sources = rag_answer(question.query)
     return {"answer": answer, "sources": sources}
