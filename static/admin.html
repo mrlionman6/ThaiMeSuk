@@ -2,12 +2,30 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <title>Admin - จัดการ Knowledge Base</title>
+    <title>Admin Login</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <h1>🔧 Admin: ตรวจสอบคำถามที่ไม่มั่นใจ</h1>
-    <div id="logsContainer">กำลังโหลด...</div>
-    <script src="/static/admin.js"></script>
+    <h1>🔐 เข้าสู่ระบบ Admin</h1>
+
+    <div id="errorMsg" style="color:red; display:none;">Username หรือ Password ไม่ถูกต้อง</div>
+
+    <form action="/admin/login" method="post">
+        <p>
+            <label>Username:</label><br>
+            <input type="text" name="username" required>
+        </p>
+        <p>
+            <label>Password:</label><br>
+            <input type="password" name="password" required>
+        </p>
+        <button type="submit">เข้าสู่ระบบ</button>
+    </form>
+
+    <script>
+        if (window.location.search.includes("error=1")) {
+            document.getElementById("errorMsg").style.display = "block";
+        }
+    </script>
 </body>
 </html>
