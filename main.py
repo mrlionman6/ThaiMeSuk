@@ -8,6 +8,7 @@ from db import (
     reject_log as db_reject_log,     # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
 )
 
+import json
 import os
 from fastapi import FastAPI, Depends, HTTPException, Request, Form
 from fastapi.staticfiles import StaticFiles
@@ -175,6 +176,29 @@ def approve_log(action: LogAction, _: bool = Depends(require_login)):
 def reject_log(action: LogAction, _: bool = Depends(require_login)):
     db_reject_log(action.log_id)
     return {"status": "rejected"}
+
+# ---------- TEMP: ย้ายข้อมูลจาก knowledge_base.json เข้า DB (ลบทิ้งหลังใช้เสร็จ) ----------
+@app.get("/admin/api/seed")
+def seed_knowledge_base(_: bool = Depends(require_login)):
+    existing = get_all_knowledge_base()
+    if existing:
+        return {
+            "status": "skipped",
+            "reason": f"knowledge_base มีข้อมูลอยู่แล้ว {len(existing)} rows — ไม่ seed ซ้ำ",
+        }
+
+    with open("knowledge_base.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    count = 0
+    for item in data:
+        content = item["content"] if isinstance(item, dict) else item
+        add_knowledge_chunk(content)
+        count += 1
+
+    rebuild_index()
+
+    return {"status": "done", "chunks_added": count}
 
 
 # ---------- เสิร์ฟหน้าเว็บผู้ใช้ ----------
