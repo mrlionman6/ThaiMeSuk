@@ -8,7 +8,6 @@ from db import (
     reject_log as db_reject_log,     # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
 )
 
-import json
 import os
 from fastapi import FastAPI, Depends, HTTPException, Request, Form
 from fastapi.staticfiles import StaticFiles
@@ -79,6 +78,11 @@ def rerank_with_scores(query, candidates, top_k=3):
     top_scores = [float(score) for text, score in ranked[:top_k]]
     return top_texts, top_scores
 
+DISCLAIMER = (
+    "\n\n⚠️ ข้อมูลนี้เป็นความรู้เบื้องต้นเท่านั้น ไม่ใช่คำแนะนำทางกฎหมาย "
+    "กรุณาปรึกษาทนายความหรือหน่วยงานราชการที่เกี่ยวข้องสำหรับกรณีเฉพาะของท่าน"
+)
+
 def rag_answer(query):
     candidates = hybrid_search(query, k=5)
     top_chunks, scores = rerank_with_scores(query, candidates, top_k=3)
@@ -90,10 +94,8 @@ def rag_answer(query):
     prompt += "คำแนะนำในการตอบ:\n"
     prompt += "- ถ้าข้อมูลอ้างอิงข้างต้นตรงกับคำถาม ให้ใช้ข้อมูลนั้นเป็นหลัก\n"
     prompt += "- ถ้าข้อมูลอ้างอิงไม่ครอบคลุมหรือไม่มีรายละเอียดพอ ให้ใช้ความรู้ทั่วไปของคุณตอบเสริมให้ครบถ้วนที่สุด โดยไม่ต้องบอกผู้ใช้ว่าข้อมูลอ้างอิงไม่พอ\n"
-    prompt += "- ตอบให้มั่นใจ ชัดเจน เป็นประโยชน์ที่สุดสำหรับผู้ถาม\n\n"
-    prompt += "ท้ายคำตอบทุกครั้ง ต้องมีข้อความ:\n"
-    prompt += "\"⚠️ ข้อมูลนี้เป็นความรู้เบื้องต้นเท่านั้น ไม่ใช่คำแนะนำทางกฎหมาย "
-    prompt += "กรุณาปรึกษาทนายความหรือหน่วยงานราชการที่เกี่ยวข้องสำหรับกรณีเฉพาะของท่าน\"\n\n"
+    prompt += "- ตอบให้มั่นใจ ชัดเจน เป็นประโยชน์ที่สุดสำหรับผู้ถาม\n"
+    prompt += "- ห้ามใส่ข้อความ disclaimer หรือคำเตือนใดๆ ท้ายคำตอบเอง ระบบจะเป็นผู้เพิ่มให้เองภายหลัง\n\n"
     prompt += "ตอบเป็นภาษาไทย กระชับ เข้าใจง่ายสำหรับประชาชนทั่วไป"
 
     response = client.messages.create(
@@ -101,7 +103,7 @@ def rag_answer(query):
         max_tokens=500,
         messages=[{"role": "user", "content": prompt}]
     )
-    answer = response.content[0].text
+    answer = response.content[0].text.strip() + DISCLAIMER  # บังคับเพิ่มด้วยโค้ด ไม่พึ่ง LLM ทำตาม prompt เพียงอย่างเดียว
 
     CONFIDENCE_THRESHOLD = 0.3
     if len(scores) == 0 or max(scores) < CONFIDENCE_THRESHOLD:
@@ -176,29 +178,6 @@ def approve_log(action: LogAction, _: bool = Depends(require_login)):
 def reject_log(action: LogAction, _: bool = Depends(require_login)):
     db_reject_log(action.log_id)
     return {"status": "rejected"}
-
-# ---------- TEMP: ย้ายข้อมูลจาก knowledge_base.json เข้า DB (ลบทิ้งหลังใช้เสร็จ) ----------
-@app.get("/admin/api/seed")
-def seed_knowledge_base(_: bool = Depends(require_login)):
-    existing = get_all_knowledge_base()
-    if existing:
-        return {
-            "status": "skipped",
-            "reason": f"knowledge_base มีข้อมูลอยู่แล้ว {len(existing)} rows — ไม่ seed ซ้ำ",
-        }
-
-    with open("knowledge_base.json", "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    count = 0
-    for item in data:
-        content = item["content"] if isinstance(item, dict) else item
-        add_knowledge_chunk(content)
-        count += 1
-
-    rebuild_index()
-
-    return {"status": "done", "chunks_added": count}
 
 
 # ---------- เสิร์ฟหน้าเว็บผู้ใช้ ----------
