@@ -37,6 +37,27 @@ button {
     border-top: 1px solid #ddd;
 }
 
+#answer h1, #answer h2, #answer h3 {
+    margin-top: 16px;
+    margin-bottom: 6px;
+}
+
+#answer p {
+    margin-top: 4px;
+    margin-bottom: 10px;
+    line-height: 1.6;
+}
+
+#answer ol, #answer ul {
+    margin-top: 4px;
+    margin-bottom: 10px;
+    padding-left: 20px;
+}
+
+#answer li {
+    margin-bottom: 4px;
+}
+
 #answerBox ul, #answerBox ol {
     padding-left: 25px;
 }
