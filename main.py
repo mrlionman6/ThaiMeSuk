@@ -1,6 +1,14 @@
-import json
+from db import (
+    init_db,
+    get_all_knowledge_base,
+    add_knowledge_chunk,
+    get_logs,
+    log_low_confidence_query,
+    approve_log as db_approve_log,   # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
+    reject_log as db_reject_log,     # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
+)
+
 import os
-from datetime import datetime
 from fastapi import FastAPI, Depends, HTTPException, Request, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
@@ -32,8 +40,8 @@ def require_login(request: Request):
     return True
 
 # ---------- Knowledge Base ----------
-with open("knowledge_base.json", "r", encoding="utf-8") as f:
-    knowledge_base = json.load(f)
+# ไม่โหลดจากไฟล์ JSON ตอน import แล้ว — ข้อมูลจะถูกโหลดจาก DB ตอน startup event (ด้านล่าง)
+knowledge_base = []
 
 def build_index():
     global kb_embeddings, bm25
@@ -41,40 +49,10 @@ def build_index():
     tokenized_kb = [word_tokenize(doc, engine="newmm") for doc in knowledge_base]
     bm25 = BM25Okapi(tokenized_kb)
 
-build_index()
-
 def rebuild_index():
     global knowledge_base
-    with open("knowledge_base.json", "r", encoding="utf-8") as f:
-        knowledge_base = json.load(f)
+    knowledge_base = get_all_knowledge_base()   # ดึงจาก PostgreSQL แทน json.load
     build_index()
-
-# ---------- Log ----------
-LOG_FILE = "low_confidence_log.json"
-
-def load_logs():
-    try:
-        with open(LOG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
-
-def save_logs(logs):
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(logs, f, ensure_ascii=False, indent=2)
-
-def log_low_confidence_query(query, answer, top_chunks, max_score):
-    logs = load_logs()
-    logs.append({
-        "id": len(logs),
-        "timestamp": datetime.now().isoformat(),
-        "query": query,
-        "answer": answer,
-        "retrieved_chunks": top_chunks,
-        "max_score": float(max_score),
-        "status": "pending"
-    })
-    save_logs(logs)
 
 # ---------- RAG Pipeline ----------
 def hybrid_search(query, k=5, alpha=0.5):
@@ -143,6 +121,12 @@ def ask_question(question: Question):
     answer, sources = rag_answer(question.query)
     return {"answer": answer, "sources": sources}
 
+# ---------- Startup Event ----------
+@app.on_event("startup")
+async def startup_event():
+    init_db()       # สร้างตาราง knowledge_base และ logs ถ้ายังไม่มี
+    rebuild_index()  # โหลด knowledge base จาก DB + build BM25/vector index
+
 # ---------- Admin Login/Logout ----------
 @app.get("/admin/login")
 def login_page():
@@ -169,36 +153,29 @@ def admin_page(request: Request):
 
 @app.get("/admin/api/logs")
 def get_pending_logs(_: bool = Depends(require_login)):
-    logs = load_logs()
-    pending = [l for l in logs if l["status"] == "pending"]
+    pending = get_logs(status="pending")   # กรองที่ DB โดยตรง ไม่ต้องดึงทั้งหมดมา filter เอง
     return {"logs": pending}
 
 @app.post("/admin/api/approve")
 def approve_log(action: LogAction, _: bool = Depends(require_login)):
-    logs = load_logs()
-    for log in logs:
-        if log["id"] == action.log_id:
-            log["status"] = "approved"
-            new_chunk = f"{log['query']} — {log['answer']}"
-            with open("knowledge_base.json", "r", encoding="utf-8") as f:
-                kb = json.load(f)
-            kb.append(new_chunk)
-            with open("knowledge_base.json", "w", encoding="utf-8") as f:
-                json.dump(kb, f, ensure_ascii=False, indent=2)
-            rebuild_index()
-            break
-    save_logs(logs)
+    # หา log ที่ตรงกับ id เพื่อเอา query/answer มาต่อเป็น chunk ใหม่
+    matching = [l for l in get_logs() if l["id"] == action.log_id]
+    if not matching:
+        raise HTTPException(status_code=404, detail="Log not found")
+    log = matching[0]
+
+    new_chunk = f"{log['query']} — {log['answer']}"
+    add_knowledge_chunk(new_chunk)
+    db_approve_log(action.log_id)
+    rebuild_index()
+
     return {"status": "approved"}
 
 @app.post("/admin/api/reject")
 def reject_log(action: LogAction, _: bool = Depends(require_login)):
-    logs = load_logs()
-    for log in logs:
-        if log["id"] == action.log_id:
-            log["status"] = "rejected"
-            break
-    save_logs(logs)
+    db_reject_log(action.log_id)
     return {"status": "rejected"}
+
 
 # ---------- เสิร์ฟหน้าเว็บผู้ใช้ ----------
 @app.get("/")
