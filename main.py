@@ -6,6 +6,7 @@ from db import (
     update_knowledge_chunk,
     delete_knowledge_chunk,
     get_logs,
+    get_logs_paginated,
     log_low_confidence_query,
     approve_log as db_approve_log,   # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
     reject_log as db_reject_log,     # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
@@ -161,9 +162,9 @@ def admin_page(request: Request):
     return FileResponse("static/admin.html")
 
 @app.get("/admin/api/logs")
-def get_pending_logs(_: bool = Depends(require_login)):
-    pending = get_logs(status="pending")   # กรองที่ DB โดยตรง ไม่ต้องดึงทั้งหมดมา filter เอง
-    return {"logs": pending}
+def get_pending_logs(page: int = 1, page_size: int = 10, _: bool = Depends(require_login)):
+    result = get_logs_paginated(status="pending", page=page, page_size=page_size)
+    return {"logs": result["items"], "total": result["total"], "page": page, "page_size": page_size}
 
 @app.post("/admin/api/approve")
 def approve_log(action: LogAction, _: bool = Depends(require_login)):
@@ -187,8 +188,9 @@ def reject_log(action: LogAction, _: bool = Depends(require_login)):
 
 # ---------- Admin API (จัดการ Knowledge Base โดยตรง — แท็บใหม่) ----------
 @app.get("/admin/api/kb")
-def list_kb(_: bool = Depends(require_login)):
-    return {"chunks": get_all_knowledge_base_full()}
+def list_kb(page: int = 1, page_size: int = 10, _: bool = Depends(require_login)):
+    result = get_all_knowledge_base_full(page=page, page_size=page_size)
+    return {"chunks": result["items"], "total": result["total"], "page": page, "page_size": page_size}
 
 @app.put("/admin/api/kb/{chunk_id}")
 def edit_kb(chunk_id: int, body: KBUpdate, _: bool = Depends(require_login)):
