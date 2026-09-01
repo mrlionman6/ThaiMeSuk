@@ -1,6 +1,15 @@
 // ---------- Tab switching ----------
 let currentTab = "pending"; // จำแท็บที่เปิดอยู่ตลอด session ของหน้า (ไม่ผูกกับ URL เพราะไม่ reload หน้า)
 
+// ---------- Pagination state (แยกกันคนละแท็บ) ----------
+let pendingPage = 1;
+let pendingPageSize = 10;
+
+let kbPage = 1;
+let kbPageSize = 10;
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50];
+
 function switchTab(tab) {
     currentTab = tab;
 
@@ -11,22 +20,30 @@ function switchTab(tab) {
     document.getElementById("tabBtnKb").classList.toggle("tab-btn-active", tab === "kb");
 
     if (tab === "pending") {
-        loadLogs();
+        loadLogs(pendingPage);
     } else {
-        loadKb();
+        loadKb(kbPage);
     }
 }
 
 // ---------- แท็บ 1: คำถามรอตรวจสอบ ----------
-async function loadLogs() {
+async function loadLogs(page = 1) {
+    pendingPage = page;
     const container = document.getElementById("logsContainer");
     try {
-        const response = await fetch("/admin/api/logs");
+        const response = await fetch(`/admin/api/logs?page=${page}&page_size=${pendingPageSize}`);
         if (!response.ok) throw new Error("HTTP " + response.status);
         const data = await response.json();
 
+        renderPagination("logsPagination", data.total, page, pendingPageSize, (newPage) => loadLogs(newPage), (newSize) => {
+            pendingPageSize = newSize;
+            loadLogs(1);
+        });
+
         if (data.logs.length === 0) {
-            container.innerHTML = "<p>ไม่มีรายการรอตรวจสอบ 🎉</p>";
+            container.innerHTML = page === 1
+                ? "<p>ไม่มีรายการรอตรวจสอบ 🎉</p>"
+                : "<p>ไม่มีรายการในหน้านี้</p>";
             return;
         }
 
@@ -61,7 +78,7 @@ async function approveLog(id) {
     } catch (error) {
         alert("เพิ่มเข้า Knowledge Base ไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
     } finally {
-        loadLogs(); // ซิงก์กับ backend เสมอ ไม่ว่าสำเร็จหรือพลาด กันข้อมูลไม่ตรงกันค้างอยู่
+        loadLogs(pendingPage); // ซิงก์กับ backend เสมอ อยู่หน้าเดิม
     }
 }
 
@@ -77,24 +94,32 @@ async function rejectLog(id) {
     } catch (error) {
         alert("ทิ้งรายการไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
     } finally {
-        loadLogs();
+        loadLogs(pendingPage);
     }
 }
 
 // ---------- แท็บ 2: จัดการ Knowledge Base ----------
-async function loadKb() {
+async function loadKb(page = 1) {
+    kbPage = page;
     const container = document.getElementById("kbContainer");
     try {
-        const response = await fetch("/admin/api/kb");
+        const response = await fetch(`/admin/api/kb?page=${page}&page_size=${kbPageSize}`);
         if (!response.ok) throw new Error("HTTP " + response.status);
         const data = await response.json();
 
+        renderPagination("kbPagination", data.total, page, kbPageSize, (newPage) => loadKb(newPage), (newSize) => {
+            kbPageSize = newSize;
+            loadKb(1);
+        });
+
         if (data.chunks.length === 0) {
-            container.innerHTML = "<p>ยังไม่มีข้อมูลใน Knowledge Base</p>";
+            container.innerHTML = page === 1
+                ? "<p>ยังไม่มีข้อมูลใน Knowledge Base</p>"
+                : "<p>ไม่มีรายการในหน้านี้</p>";
             return;
         }
 
-        container.innerHTML = `<p style="color:#666; font-size:14px;">ทั้งหมด ${data.chunks.length} รายการ</p>`;
+        container.innerHTML = `<p style="color:#666; font-size:14px;">ทั้งหมด ${data.total} รายการ</p>`;
         data.chunks.forEach(chunk => {
             const div = document.createElement("div");
             div.className = "card";
@@ -147,8 +172,44 @@ async function deleteKb(id) {
     } catch (error) {
         alert("ลบไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
     } finally {
-        loadKb();
+        loadKb(kbPage); // อยู่หน้าเดิม (ถ้าหน้านี้ว่างเปล่าไปหลังลบ ผู้ใช้กด "ก่อนหน้า" เองได้)
     }
+}
+
+// ---------- Pagination UI (ใช้ร่วมกันทั้ง 2 แท็บ) ----------
+function renderPagination(containerId, total, currentPage, pageSize, onPageChange, onPageSizeChange) {
+    const el = document.getElementById(containerId);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    if (total === 0) {
+        el.innerHTML = "";
+        return;
+    }
+
+    const sizeOptions = PAGE_SIZE_OPTIONS.map(size =>
+        `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size} รายการ/หน้า</option>`
+    ).join("");
+
+    el.innerHTML = `
+        <div class="pagination-controls">
+            <span class="pagination-info">ทั้งหมด ${total} รายการ — หน้า ${currentPage}/${totalPages}</span>
+            <div class="pagination-buttons">
+                <button ${currentPage <= 1 ? "disabled" : ""} id="${containerId}-prev">← ก่อนหน้า</button>
+                <button ${currentPage >= totalPages ? "disabled" : ""} id="${containerId}-next">ถัดไป →</button>
+                <select id="${containerId}-size">${sizeOptions}</select>
+            </div>
+        </div>
+    `;
+
+    document.getElementById(containerId + "-prev").onclick = () => {
+        if (currentPage > 1) onPageChange(currentPage - 1);
+    };
+    document.getElementById(containerId + "-next").onclick = () => {
+        if (currentPage < totalPages) onPageChange(currentPage + 1);
+    };
+    document.getElementById(containerId + "-size").onchange = (e) => {
+        onPageSizeChange(parseInt(e.target.value, 10));
+    };
 }
 
 // ---------- Helpers ----------
@@ -164,4 +225,4 @@ function escapeHtml(str) {
 }
 
 // ---------- Init ----------
-loadLogs(); // แท็บเริ่มต้นคือ "รอตรวจสอบ"
+loadLogs(1); // แท็บเริ่มต้นคือ "รอตรวจสอบ"
