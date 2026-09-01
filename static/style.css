@@ -101,3 +101,43 @@ button {
     box-sizing: border-box;
     resize: vertical;
 }
+
+/* ---------- Admin: pagination ---------- */
+.pagination-bar {
+    margin-top: 10px;
+}
+
+.pagination-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 0;
+    font-size: 14px;
+}
+
+.pagination-info {
+    color: #666;
+}
+
+.pagination-buttons {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pagination-buttons button {
+    padding: 6px 12px;
+    font-size: 14px;
+}
+
+.pagination-buttons button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pagination-buttons select {
+    padding: 6px 8px;
+    font-size: 14px;
+}
