@@ -1,7 +1,10 @@
 from db import (
     init_db,
     get_all_knowledge_base,
+    get_all_knowledge_base_full,
     add_knowledge_chunk,
+    update_knowledge_chunk,
+    delete_knowledge_chunk,
     get_logs,
     log_low_confidence_query,
     approve_log as db_approve_log,   # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
@@ -118,6 +121,9 @@ class Question(BaseModel):
 class LogAction(BaseModel):
     log_id: int
 
+class KBUpdate(BaseModel):
+    content: str
+
 # ---------- User API ----------
 @app.post("/ask")
 def ask_question(question: Question):
@@ -147,7 +153,7 @@ def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/admin/login", status_code=303)
 
-# ---------- Admin Page & API ----------
+# ---------- Admin Page & API (คำถามรอตรวจสอบ) ----------
 @app.get("/admin")
 def admin_page(request: Request):
     if not request.session.get("logged_in"):
@@ -178,6 +184,27 @@ def approve_log(action: LogAction, _: bool = Depends(require_login)):
 def reject_log(action: LogAction, _: bool = Depends(require_login)):
     db_reject_log(action.log_id)
     return {"status": "rejected"}
+
+# ---------- Admin API (จัดการ Knowledge Base โดยตรง — แท็บใหม่) ----------
+@app.get("/admin/api/kb")
+def list_kb(_: bool = Depends(require_login)):
+    return {"chunks": get_all_knowledge_base_full()}
+
+@app.put("/admin/api/kb/{chunk_id}")
+def edit_kb(chunk_id: int, body: KBUpdate, _: bool = Depends(require_login)):
+    ok = update_knowledge_chunk(chunk_id, body.content)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    rebuild_index()
+    return {"status": "updated"}
+
+@app.delete("/admin/api/kb/{chunk_id}")
+def delete_kb(chunk_id: int, _: bool = Depends(require_login)):
+    ok = delete_knowledge_chunk(chunk_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    rebuild_index()
+    return {"status": "deleted"}
 
 
 # ---------- เสิร์ฟหน้าเว็บผู้ใช้ ----------
