@@ -4,18 +4,19 @@ body {
     margin: 40px auto;
     padding: 0 20px;
 }
- 
+
 input {
     width: 70%;
     padding: 10px;
     font-size: 16px;
 }
- 
+
 button {
     padding: 10px 20px;
     font-size: 16px;
+    cursor: pointer;
 }
- 
+
 #answerBox {
     margin-top: 20px;
     line-height: 1.6;
@@ -23,33 +24,80 @@ button {
        เพราะไปแสดงช่องว่าง/บรรทัดใหม่ในซอร์ส HTML ที่ marked.js สร้างขึ้น
        ซ้อนทับกับ margin ของแต่ละ tag (h1, p, ol ฯลฯ) อีกชั้น */
 }
- 
+
 #answerBox h1, #answerBox h2, #answerBox h3 {
     margin-top: 16px;
     margin-bottom: 6px;
 }
- 
+
 #answerBox p {
     margin-top: 4px;
     margin-bottom: 10px;
 }
- 
+
 #answerBox ol, #answerBox ul {
     margin-top: 4px;
     margin-bottom: 10px;
     padding-left: 25px;
 }
- 
+
 #answerBox li {
     margin-bottom: 4px;
 }
- 
+
 #answerBox strong {
     color: #1a1a1a;
 }
- 
+
 #answerBox hr {
     margin: 20px 0;
     border: none;
     border-top: 1px solid #ddd;
+}
+
+/* ---------- Admin: แท็บ ---------- */
+.tab-bar {
+    display: flex;
+    gap: 4px;
+    margin: 20px 0;
+    border-bottom: 2px solid #eee;
+}
+
+.tab-btn {
+    padding: 10px 18px;
+    font-size: 15px;
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    color: #888;
+    cursor: pointer;
+}
+
+.tab-btn:hover {
+    color: #333;
+}
+
+.tab-btn-active {
+    color: #1a1a1a;
+    font-weight: bold;
+    border-bottom: 3px solid #333;
+}
+
+/* ---------- Admin: การ์ดรายการ (ใช้ทั้งแท็บ pending และ kb) ---------- */
+.card {
+    border: 1px solid #ddd;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 8px;
+}
+
+.kb-textarea {
+    width: 100%;
+    min-height: 80px;
+    padding: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    line-height: 1.5;
+    box-sizing: border-box;
+    resize: vertical;
 }
