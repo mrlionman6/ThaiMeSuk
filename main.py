@@ -100,7 +100,7 @@ def rag_answer(query):
 
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=500,
+        max_tokens=1500,
         messages=[{"role": "user", "content": prompt}]
     )
     answer = response.content[0].text.strip() + DISCLAIMER  # บังคับเพิ่มด้วยโค้ด ไม่พึ่ง LLM ทำตาม prompt เพียงอย่างเดียว
