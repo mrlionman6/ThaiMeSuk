@@ -4,60 +4,52 @@ body {
     margin: 40px auto;
     padding: 0 20px;
 }
-
+ 
 input {
     width: 70%;
     padding: 10px;
     font-size: 16px;
 }
-
+ 
 button {
     padding: 10px 20px;
     font-size: 16px;
 }
-
+ 
 #answerBox {
     margin-top: 20px;
-    white-space: pre-wrap;
     line-height: 1.6;
+    /* ลบ white-space: pre-wrap ออก — ตัวการที่ทำให้ระยะห่างเกินจริง
+       เพราะไปแสดงช่องว่าง/บรรทัดใหม่ในซอร์ส HTML ที่ marked.js สร้างขึ้น
+       ซ้อนทับกับ margin ของแต่ละ tag (h1, p, ol ฯลฯ) อีกชั้น */
 }
-
+ 
 #answerBox h1, #answerBox h2, #answerBox h3 {
-    margin-top: 20px;
+    margin-top: 16px;
+    margin-bottom: 6px;
+}
+ 
+#answerBox p {
+    margin-top: 4px;
     margin-bottom: 10px;
 }
-
+ 
+#answerBox ol, #answerBox ul {
+    margin-top: 4px;
+    margin-bottom: 10px;
+    padding-left: 25px;
+}
+ 
+#answerBox li {
+    margin-bottom: 4px;
+}
+ 
 #answerBox strong {
     color: #1a1a1a;
 }
-
+ 
 #answerBox hr {
     margin: 20px 0;
     border: none;
     border-top: 1px solid #ddd;
-}
-
-#answer h1, #answer h2, #answer h3 {
-    margin-top: 16px;
-    margin-bottom: 6px;
-}
-
-#answer p {
-    margin-top: 4px;
-    margin-bottom: 10px;
-    line-height: 1.6;
-}
-
-#answer ol, #answer ul {
-    margin-top: 4px;
-    margin-bottom: 10px;
-    padding-left: 20px;
-}
-
-#answer li {
-    margin-bottom: 4px;
-}
-
-#answerBox ul, #answerBox ol {
-    padding-left: 25px;
 }
