@@ -6,10 +6,27 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <h1>🔧 Admin: ตรวจสอบคำถามที่ไม่มั่นใจ 
+    <h1>🔧 Admin: จัดการระบบ
         <a href="/admin/logout" style="font-size:14px; float:right;">🚪 Logout</a>
     </h1>
-    <div id="logsContainer">กำลังโหลด...</div>
+
+    <div class="tab-bar">
+        <button id="tabBtnPending" class="tab-btn tab-btn-active" onclick="switchTab('pending')">
+            📋 รอตรวจสอบ
+        </button>
+        <button id="tabBtnKb" class="tab-btn" onclick="switchTab('kb')">
+            📚 Knowledge Base
+        </button>
+    </div>
+
+    <div id="tabPending" class="tab-panel">
+        <div id="logsContainer">กำลังโหลด...</div>
+    </div>
+
+    <div id="tabKb" class="tab-panel" style="display:none;">
+        <div id="kbContainer">กำลังโหลด...</div>
+    </div>
+
     <script src="/static/admin.js"></script>
 </body>
 </html>
