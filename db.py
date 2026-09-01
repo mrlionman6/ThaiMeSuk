@@ -65,11 +65,14 @@ def get_all_knowledge_base() -> list[str]:
         return [row.content for row in rows]
 
 
-def get_all_knowledge_base_full() -> list[dict]:
-    """คืนค่า id + content + created_at ทั้งหมด เรียงตาม id — ใช้แสดงในแท็บจัดการ KB"""
+def get_all_knowledge_base_full(page: int = 1, page_size: int = 10) -> dict:
+    """คืนค่า id + content + created_at แบบแบ่งหน้า — ใช้แสดงในแท็บจัดการ KB
+    คืนค่า {"items": [...], "total": จำนวนทั้งหมด}"""
     with SessionLocal() as session:
-        rows = session.query(KnowledgeBase).order_by(KnowledgeBase.id).all()
-        return [
+        q = session.query(KnowledgeBase).order_by(KnowledgeBase.id)
+        total = q.count()
+        rows = q.offset((page - 1) * page_size).limit(page_size).all()
+        items = [
             {
                 "id": r.id,
                 "content": r.content,
@@ -77,6 +80,7 @@ def get_all_knowledge_base_full() -> list[dict]:
             }
             for r in rows
         ]
+        return {"items": items, "total": total}
 
 
 def add_knowledge_chunk(content: str) -> int:
@@ -132,7 +136,7 @@ def log_low_confidence_query(
 
 
 def get_logs(status: Optional[str] = None) -> list[dict]:
-    """ดึง logs ทั้งหมด หรือกรองตาม status (เช่น 'pending') — ใช้แสดงในหน้า admin"""
+    """ดึง logs ทั้งหมด (ไม่แบ่งหน้า) หรือกรองตาม status — ใช้ lookup ภายใน (เช่นตอน approve หา log ด้วย id)"""
     with SessionLocal() as session:
         q = session.query(Log)
         if status:
@@ -150,6 +154,30 @@ def get_logs(status: Optional[str] = None) -> list[dict]:
             }
             for r in rows
         ]
+
+
+def get_logs_paginated(status: Optional[str] = None, page: int = 1, page_size: int = 10) -> dict:
+    """ดึง logs แบบแบ่งหน้า — ใช้แสดงในแท็บ 'รอตรวจสอบ'
+    คืนค่า {"items": [...], "total": จำนวนทั้งหมด}"""
+    with SessionLocal() as session:
+        q = session.query(Log)
+        if status:
+            q = q.filter(Log.status == status)
+        total = q.count()
+        rows = q.order_by(Log.timestamp.desc()).offset((page - 1) * page_size).limit(page_size).all()
+        items = [
+            {
+                "id": r.id,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+                "query": r.query,
+                "answer": r.answer,
+                "retrieved_chunks": r.retrieved_chunks,
+                "max_score": r.max_score,
+                "status": r.status,
+            }
+            for r in rows
+        ]
+        return {"items": items, "total": total}
 
 
 def approve_log(log_id: int) -> bool:
