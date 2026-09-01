@@ -2,11 +2,12 @@
 db.py — เลเยอร์เชื่อมต่อ PostgreSQL สำหรับ ThaiMeSuk
 
 แทนที่การอ่าน/เขียน knowledge_base.json และ low_confidence_log.json ด้วยเดิม
-วาง require: sqlalchemy, psycopg2-binary ใน requirements.txt (ดู requirements_addition.txt)
+วาง require: sqlalchemy, psycopg2-binary ใน requirements.txt
 
 การใช้งานใน main.py:
     from db import (
-        init_db, get_all_knowledge_base, add_knowledge_chunk,
+        init_db, get_all_knowledge_base, get_all_knowledge_base_full,
+        add_knowledge_chunk, update_knowledge_chunk, delete_knowledge_chunk,
         get_logs, log_low_confidence_query, approve_log, reject_log,
     )
 """
@@ -64,6 +65,20 @@ def get_all_knowledge_base() -> list[str]:
         return [row.content for row in rows]
 
 
+def get_all_knowledge_base_full() -> list[dict]:
+    """คืนค่า id + content + created_at ทั้งหมด เรียงตาม id — ใช้แสดงในแท็บจัดการ KB"""
+    with SessionLocal() as session:
+        rows = session.query(KnowledgeBase).order_by(KnowledgeBase.id).all()
+        return [
+            {
+                "id": r.id,
+                "content": r.content,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+
+
 def add_knowledge_chunk(content: str) -> int:
     """เพิ่ม chunk ใหม่ (ตอน admin approve) — คืนค่า id ที่เพิ่ง insert"""
     with SessionLocal() as session:
@@ -72,6 +87,28 @@ def add_knowledge_chunk(content: str) -> int:
         session.commit()
         session.refresh(row)
         return row.id
+
+
+def update_knowledge_chunk(chunk_id: int, content: str) -> bool:
+    """แก้ไขเนื้อหา chunk ที่มีอยู่แล้ว — คืนค่า False ถ้าไม่เจอ id นี้"""
+    with SessionLocal() as session:
+        row = session.get(KnowledgeBase, chunk_id)
+        if row is None:
+            return False
+        row.content = content
+        session.commit()
+        return True
+
+
+def delete_knowledge_chunk(chunk_id: int) -> bool:
+    """ลบ chunk ทิ้ง — คืนค่า False ถ้าไม่เจอ id นี้"""
+    with SessionLocal() as session:
+        row = session.get(KnowledgeBase, chunk_id)
+        if row is None:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
 
 
 # ---------- Logs ----------
