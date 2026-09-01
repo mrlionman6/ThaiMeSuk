@@ -1,44 +1,167 @@
-async function loadLogs() {
-    const response = await fetch("/admin/api/logs");
-    const data = await response.json();
-    const container = document.getElementById("logsContainer");
+// ---------- Tab switching ----------
+let currentTab = "pending"; // จำแท็บที่เปิดอยู่ตลอด session ของหน้า (ไม่ผูกกับ URL เพราะไม่ reload หน้า)
 
-    if (data.logs.length === 0) {
-        container.innerHTML = "<p>ไม่มีรายการรอตรวจสอบ 🎉</p>";
-        return;
+function switchTab(tab) {
+    currentTab = tab;
+
+    document.getElementById("tabPending").style.display = tab === "pending" ? "block" : "none";
+    document.getElementById("tabKb").style.display = tab === "kb" ? "block" : "none";
+
+    document.getElementById("tabBtnPending").classList.toggle("tab-btn-active", tab === "pending");
+    document.getElementById("tabBtnKb").classList.toggle("tab-btn-active", tab === "kb");
+
+    if (tab === "pending") {
+        loadLogs();
+    } else {
+        loadKb();
     }
+}
 
-    container.innerHTML = "";
-    data.logs.forEach(log => {
-        const div = document.createElement("div");
-        div.style = "border:1px solid #ddd; padding:15px; margin-bottom:15px; border-radius:8px;";
-        div.innerHTML = `
-            <p><strong>คำถาม:</strong> ${log.query}</p>
-            <p><strong>คำตอบที่ Claude ตอบ:</strong> ${log.answer}</p>
-            <p><strong>คะแนนความมั่นใจ:</strong> ${log.max_score.toFixed(3)}</p>
-            <button onclick="approveLog(${log.id})">✅ เพิ่มเข้า Knowledge Base</button>
-            <button onclick="rejectLog(${log.id})">❌ ทิ้งไป</button>
-        `;
-        container.appendChild(div);
-    });
+// ---------- แท็บ 1: คำถามรอตรวจสอบ ----------
+async function loadLogs() {
+    const container = document.getElementById("logsContainer");
+    try {
+        const response = await fetch("/admin/api/logs");
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const data = await response.json();
+
+        if (data.logs.length === 0) {
+            container.innerHTML = "<p>ไม่มีรายการรอตรวจสอบ 🎉</p>";
+            return;
+        }
+
+        container.innerHTML = "";
+        data.logs.forEach(log => {
+            const div = document.createElement("div");
+            div.className = "card";
+            div.id = "log-" + log.id;
+            div.innerHTML = `
+                <p><strong>คำถาม:</strong> ${escapeHtml(log.query)}</p>
+                <p><strong>คำตอบที่ Claude ตอบ:</strong> ${escapeHtml(log.answer)}</p>
+                <p><strong>คะแนนความมั่นใจ:</strong> ${log.max_score.toFixed(3)}</p>
+                <button onclick="approveLog(${log.id})">✅ เพิ่มเข้า Knowledge Base</button>
+                <button onclick="rejectLog(${log.id})">❌ ทิ้งไป</button>
+            `;
+            container.appendChild(div);
+        });
+    } catch (error) {
+        container.innerHTML = "<p style='color:red;'>โหลดรายการไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
+    }
 }
 
 async function approveLog(id) {
-    await fetch("/admin/api/approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ log_id: id })
-    });
-    loadLogs();
+    removeCardOptimistically("log-" + id); // ลบการ์ดออกจากจอทันที ไม่ต้องรอ backend ตอบ
+    try {
+        const res = await fetch("/admin/api/approve", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ log_id: id })
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+    } catch (error) {
+        alert("เพิ่มเข้า Knowledge Base ไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
+    } finally {
+        loadLogs(); // ซิงก์กับ backend เสมอ ไม่ว่าสำเร็จหรือพลาด กันข้อมูลไม่ตรงกันค้างอยู่
+    }
 }
 
 async function rejectLog(id) {
-    await fetch("/admin/api/reject", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ log_id: id })
-    });
-    loadLogs();
+    removeCardOptimistically("log-" + id);
+    try {
+        const res = await fetch("/admin/api/reject", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ log_id: id })
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+    } catch (error) {
+        alert("ทิ้งรายการไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
+    } finally {
+        loadLogs();
+    }
 }
 
-loadLogs();
+// ---------- แท็บ 2: จัดการ Knowledge Base ----------
+async function loadKb() {
+    const container = document.getElementById("kbContainer");
+    try {
+        const response = await fetch("/admin/api/kb");
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const data = await response.json();
+
+        if (data.chunks.length === 0) {
+            container.innerHTML = "<p>ยังไม่มีข้อมูลใน Knowledge Base</p>";
+            return;
+        }
+
+        container.innerHTML = `<p style="color:#666; font-size:14px;">ทั้งหมด ${data.chunks.length} รายการ</p>`;
+        data.chunks.forEach(chunk => {
+            const div = document.createElement("div");
+            div.className = "card";
+            div.id = "kb-" + chunk.id;
+            div.innerHTML = `
+                <p style="color:#888; font-size:12px; margin-bottom:4px;">#${chunk.id}</p>
+                <textarea id="kb-textarea-${chunk.id}" class="kb-textarea">${escapeHtml(chunk.content)}</textarea>
+                <div style="margin-top:8px;">
+                    <button onclick="saveKb(${chunk.id})">💾 บันทึก</button>
+                    <button onclick="deleteKb(${chunk.id})">🗑️ ลบ</button>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    } catch (error) {
+        container.innerHTML = "<p style='color:red;'>โหลด Knowledge Base ไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
+    }
+}
+
+async function saveKb(id) {
+    const textarea = document.getElementById("kb-textarea-" + id);
+    const newContent = textarea.value;
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = "กำลังบันทึก...";
+
+    try {
+        const res = await fetch("/admin/api/kb/" + id, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: newContent })
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        btn.textContent = "✅ บันทึกแล้ว";
+        setTimeout(() => { btn.textContent = "💾 บันทึก"; btn.disabled = false; }, 1200);
+    } catch (error) {
+        alert("บันทึกไม่สำเร็จ: " + error);
+        btn.textContent = "💾 บันทึก";
+        btn.disabled = false;
+    }
+}
+
+async function deleteKb(id) {
+    if (!confirm("ยืนยันลบรายการนี้ออกจาก Knowledge Base ถาวร?")) return;
+
+    removeCardOptimistically("kb-" + id);
+    try {
+        const res = await fetch("/admin/api/kb/" + id, { method: "DELETE" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+    } catch (error) {
+        alert("ลบไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
+    } finally {
+        loadKb();
+    }
+}
+
+// ---------- Helpers ----------
+function removeCardOptimistically(elementId) {
+    const el = document.getElementById(elementId);
+    if (el) el.remove();
+}
+
+function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+// ---------- Init ----------
+loadLogs(); // แท็บเริ่มต้นคือ "รอตรวจสอบ"
