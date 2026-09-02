@@ -16,7 +16,8 @@ from db import (
 )
 
 import os
-from fastapi import FastAPI, Depends, HTTPException, Request, Form
+import json
+from fastapi import FastAPI, Depends, HTTPException, Request, Form, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
@@ -146,6 +147,9 @@ class LogAction(BaseModel):
 class KBUpdate(BaseModel):
     content: str
 
+class KBCreate(BaseModel):
+    content: str
+
 # ---------- User API ----------
 @app.post("/ask")
 def ask_question(question: Question):
@@ -213,6 +217,51 @@ def reject_log(action: LogAction, _: bool = Depends(require_login)):
 def list_kb(page: int = 1, page_size: int = 10, _: bool = Depends(require_login)):
     result = get_all_knowledge_base_full(page=page, page_size=page_size)
     return {"chunks": result["items"], "total": result["total"], "page": page, "page_size": page_size}
+
+@app.post("/admin/api/kb")
+def create_kb(body: KBCreate, _: bool = Depends(require_login)):
+    """เพิ่ม chunk เดี่ยว พิมพ์เองผ่านหน้า admin — คำนวณ embedding ทันที ไม่ต้อง restart"""
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="เนื้อหาห้ามว่างเปล่า")
+    embedding = embed_model.encode(content).tolist()
+    new_id = add_knowledge_chunk(content, embedding=embedding)
+    rebuild_index()
+    return {"status": "created", "id": new_id}
+
+@app.post("/admin/api/kb/bulk")
+async def bulk_create_kb(file: UploadFile = File(...), _: bool = Depends(require_login)):
+    """Import หลาย chunk พร้อมกันจากไฟล์ — รองรับ .json (list ของ string หรือ dict ที่มี key content
+    เหมือนโครงสร้าง knowledge_base.json เดิม) หรือ .txt (หนึ่งบรรทัดต่อหนึ่ง chunk)"""
+    raw = await file.read()
+    try:
+        text_content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="อ่านไฟล์ไม่ได้ — ต้องเป็น UTF-8 text เท่านั้น")
+
+    filename = (file.filename or "").lower()
+    if filename.endswith(".json"):
+        try:
+            data = json.loads(text_content)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="ไฟล์ JSON รูปแบบไม่ถูกต้อง")
+        items = [d["content"] if isinstance(d, dict) else str(d) for d in data]
+    else:
+        # .txt หรือนามสกุลอื่น: ถือว่าหนึ่งบรรทัดคือหนึ่ง chunk ข้ามบรรทัดว่าง
+        items = [line.strip() for line in text_content.splitlines() if line.strip()]
+
+    items = [i.strip() for i in items if i and i.strip()]
+    if not items:
+        raise HTTPException(status_code=400, detail="ไม่พบเนื้อหาที่ import ได้ในไฟล์นี้")
+
+    embeddings = embed_model.encode(items)  # batch encode ครั้งเดียว เร็วกว่า loop เรียกทีละตัว
+    added_ids = [
+        add_knowledge_chunk(content, embedding=embedding.tolist())
+        for content, embedding in zip(items, embeddings)
+    ]
+
+    rebuild_index()
+    return {"status": "created", "count": len(added_ids), "ids": added_ids}
 
 @app.put("/admin/api/kb/{chunk_id}")
 def edit_kb(chunk_id: int, body: KBUpdate, _: bool = Depends(require_login)):
