@@ -8,6 +8,38 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
 </head>
 <body>
+    <!-- ปุ่มเปิด sidebar (มุมซ้ายบน ลอยอยู่เสมอ) -->
+    <button id="sidebarToggle" aria-label="เปิดเมนู" aria-expanded="false" aria-controls="sideMenu">
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+    </button>
+
+    <!-- พื้นหลังมืดตอน sidebar เปิด (กดเพื่อปิด) -->
+    <div id="sidebarBackdrop" hidden></div>
+
+    <!-- Sidebar -->
+    <nav id="sideMenu" aria-hidden="true">
+        <div class="side-top">
+            <span class="side-brand">ThaiMeSuk</span>
+            <button id="sidebarClose" aria-label="ปิดเมนู">✕</button>
+        </div>
+
+        <!-- พื้นที่รายการแชท — โครงไว้รองรับการเพิ่ม/ลบในอนาคต ตอนนี้ยังว่างเปล่า -->
+        <div class="side-middle">
+            <button id="newChatBtn" class="side-new-chat-btn" onclick="startNewChat()">+ แชทใหม่</button>
+            <div class="side-section-label">ประวัติแชท</div>
+            <ul id="chatHistoryList">
+                <li class="side-empty">เข้าสู่ระบบเพื่อบันทึกประวัติแชท</li>
+            </ul>
+        </div>
+
+        <!-- พื้นที่ผู้ใช้ (login/signup/signout) -->
+        <div class="side-bottom" id="userArea">
+            <!-- โครง JS จะสลับเนื้อหาส่วนนี้ตามสถานะ login (ดู script.js) -->
+        </div>
+    </nav>
+
     <h1>⚖️ ผู้ช่วยความรู้กฎหมายเบื้องต้น</h1>
 
     <input type="text" id="questionInput" placeholder="พิมพ์คำถามเกี่ยวกับกฎหมายที่ท่านสงสัย">
