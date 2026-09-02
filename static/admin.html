@@ -25,6 +25,25 @@
     </div>
 
     <div id="tabKb" class="tab-panel" style="display:none;">
+        <div class="kb-toolbar">
+            <details class="kb-toolbar-section">
+                <summary>➕ เพิ่ม chunk เดี่ยว</summary>
+                <div class="kb-toolbar-body">
+                    <textarea id="newChunkText" class="kb-textarea" placeholder="พิมพ์เนื้อหาที่จะเพิ่มเข้า Knowledge Base"></textarea>
+                    <button onclick="addSingleChunk()">เพิ่ม</button>
+                    <span id="addChunkStatus" class="kb-toolbar-status"></span>
+                </div>
+            </details>
+            <details class="kb-toolbar-section">
+                <summary>📁 Import จากไฟล์ (หลาย chunk พร้อมกัน)</summary>
+                <div class="kb-toolbar-body">
+                    <p class="ts-note">รองรับ .json (list ของข้อความ) หรือ .txt (หนึ่งบรรทัดต่อหนึ่ง chunk)</p>
+                    <input type="file" id="bulkFileInput" accept=".json,.txt">
+                    <button onclick="bulkImportChunks()">Import</button>
+                    <span id="bulkImportStatus" class="kb-toolbar-status"></span>
+                </div>
+            </details>
+        </div>
         <div id="kbContainer">กำลังโหลด...</div>
         <div id="kbPagination" class="pagination-bar"></div>
     </div>
