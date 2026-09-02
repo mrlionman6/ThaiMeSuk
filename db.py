@@ -21,7 +21,7 @@ import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    create_engine, Column, Integer, Text, DateTime, Float, String, JSON, text
+    create_engine, Column, Integer, Text, DateTime, Float, String, JSON, text, ForeignKey
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 from pgvector.sqlalchemy import Vector
@@ -58,6 +58,35 @@ class Log(Base):
     retrieved_chunks = Column(JSON)
     max_score = Column(Float)
     status = Column(String, nullable=False, default="pending")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    email = Column(String, nullable=False, unique=True, index=True)
+    password_hash = Column(String, nullable=False)  # เก็บ bcrypt hash เท่านั้น ไม่เก็บ plain text
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    title = Column(String, nullable=False, default="แชทใหม่")
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)  # ใช้เรียง "ล่าสุดก่อน" + ตัดสิน 10 อันล่าสุด
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # "user" หรือ "assistant"
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
 
 
 def init_db():
@@ -180,6 +209,155 @@ def get_vector_scores_for_all(query_embedding: list[float]) -> dict[int, float]:
             .all()
         )
         return {r.id: 1 - r.distance for r in rows}
+
+
+# ---------- Users & Auth ----------
+# หมายเหตุ: การ hash/verify password (bcrypt) ทำที่ main.py ไม่ใช่ที่นี่
+# เพราะเป็นเรื่อง auth logic ไม่ใช่ data access — db.py รับแค่ password_hash ที่ hash มาแล้ว
+
+def create_user(email: str, password_hash: str) -> Optional[int]:
+    """สร้างผู้ใช้ใหม่ — คืนค่า None ถ้าอีเมลนี้มีคนใช้แล้ว (ไม่ throw exception ให้ caller เช็คง่ายๆ)"""
+    with SessionLocal() as session:
+        existing = session.query(User).filter(User.email == email).first()
+        if existing:
+            return None
+        row = User(email=email, password_hash=password_hash)
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row.id
+
+
+def get_user_by_email(email: str) -> Optional[dict]:
+    """ใช้ตอน login — คืน password_hash มาด้วยเพื่อให้ main.py เอาไป verify"""
+    with SessionLocal() as session:
+        row = session.query(User).filter(User.email == email).first()
+        if row is None:
+            return None
+        return {"id": row.id, "email": row.email, "password_hash": row.password_hash}
+
+
+def get_user_by_id(user_id: int) -> Optional[dict]:
+    """ใช้เช็คตอนโหลดหน้า (GET /api/auth/me) — ไม่คืน password_hash ออกไป"""
+    with SessionLocal() as session:
+        row = session.get(User, user_id)
+        if row is None:
+            return None
+        return {"id": row.id, "email": row.email}
+
+
+# ---------- Chat sessions & messages ----------
+MAX_CHATS_PER_USER = 10  # เก็บแค่ 10 แชทล่าสุดต่อบัญชี เกินนี้ลบตัวเก่าสุดทิ้งอัตโนมัติ
+
+
+def _enforce_chat_limit(user_id: int, max_chats: int = MAX_CHATS_PER_USER):
+    """ลบแชทเก่าสุดทิ้งถ้าเกิน max_chats — เรียกทุกครั้งหลังสร้างแชทใหม่
+    ลบผ่าน ORM (ไม่ใช่ raw SQL) เพื่อให้ ON DELETE CASCADE ที่ตั้งไว้ใน ForeignKey ลบ
+    chat_messages ที่เกี่ยวข้องให้เองที่ระดับ DB ไม่ต้องวนลบ message เองใน Python"""
+    with SessionLocal() as session:
+        rows = (
+            session.query(ChatSession)
+            .filter(ChatSession.user_id == user_id)
+            .order_by(ChatSession.updated_at.desc())
+            .all()
+        )
+        if len(rows) > max_chats:
+            for row in rows[max_chats:]:
+                session.delete(row)
+            session.commit()
+
+
+def create_chat_session(user_id: int, title: str = "แชทใหม่") -> int:
+    with SessionLocal() as session:
+        row = ChatSession(user_id=user_id, title=title)
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        new_id = row.id
+
+    _enforce_chat_limit(user_id)
+    return new_id
+
+
+def touch_chat_session(session_id: int):
+    """อัปเดต updated_at ตอนมีข้อความใหม่เข้าแชท — ใช้เรียงลำดับ 'ล่าสุดก่อน' ในไซด์บาร์"""
+    with SessionLocal() as session:
+        row = session.get(ChatSession, session_id)
+        if row is not None:
+            row.updated_at = datetime.datetime.utcnow()
+            session.commit()
+
+
+def get_user_chats(user_id: int) -> list[dict]:
+    """คืนรายการแชทของ user เรียงล่าสุดก่อน — ใช้แสดงในไซด์บาร์"""
+    with SessionLocal() as session:
+        rows = (
+            session.query(ChatSession)
+            .filter(ChatSession.user_id == user_id)
+            .order_by(ChatSession.updated_at.desc())
+            .all()
+        )
+        return [
+            {"id": r.id, "title": r.title, "updated_at": r.updated_at.isoformat() if r.updated_at else None}
+            for r in rows
+        ]
+
+
+def get_chat_session(session_id: int, user_id: int) -> Optional[dict]:
+    """คืนค่า None ถ้าไม่เจอ หรือแชทนี้ไม่ใช่ของ user คนนี้ (กัน user คนอื่นแอบดู/แก้แชทของคนอื่น)"""
+    with SessionLocal() as session:
+        row = (
+            session.query(ChatSession)
+            .filter(ChatSession.id == session_id, ChatSession.user_id == user_id)
+            .first()
+        )
+        if row is None:
+            return None
+        return {"id": row.id, "title": row.title}
+
+
+def add_chat_message(session_id: int, role: str, content: str) -> int:
+    with SessionLocal() as session:
+        row = ChatMessage(session_id=session_id, role=role, content=content)
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row.id
+
+
+def get_chat_messages(session_id: int) -> list[dict]:
+    """คืนข้อความทั้งหมดในแชทเดียว เรียงตามเวลา — ไม่เช็ค ownership ในนี้ (caller ต้องเช็คผ่าน get_chat_session ก่อนเสมอ)"""
+    with SessionLocal() as session:
+        rows = (
+            session.query(ChatMessage)
+            .filter(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.created_at)
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "role": r.role,
+                "content": r.content,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+
+
+def delete_chat_session(session_id: int, user_id: int) -> bool:
+    """ลบแชท — คืนค่า False ถ้าไม่เจอหรือไม่ใช่เจ้าของ ON DELETE CASCADE ลบ message ที่เกี่ยวข้องให้เอง"""
+    with SessionLocal() as session:
+        row = (
+            session.query(ChatSession)
+            .filter(ChatSession.id == session_id, ChatSession.user_id == user_id)
+            .first()
+        )
+        if row is None:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
 
 
 # ---------- Logs ----------
