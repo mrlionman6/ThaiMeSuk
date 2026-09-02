@@ -332,3 +332,65 @@ button {
     padding: 6px 10px;
     flex-shrink: 0;
 }
+
+/* ---------- Sidebar: ฟอร์ม login/register ---------- */
+.side-auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.side-auth-form input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px;
+    font-size: 13px;
+}
+
+.side-auth-form-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.side-auth-form-buttons button {
+    flex: 1;
+    font-size: 13px;
+    padding: 6px;
+}
+
+.side-auth-error {
+    font-size: 12px;
+    color: #c0392b;
+    min-height: 14px;
+}
+
+/* ---------- Sidebar: ปุ่มแชทใหม่ + highlight แชทที่เปิดอยู่ ---------- */
+.side-new-chat-btn {
+    width: 100%;
+    margin-bottom: 14px;
+    font-size: 14px;
+    padding: 8px;
+}
+
+.side-chat-active {
+    background: #eef2ff;
+    font-weight: bold;
+}
+
+/* ---------- แสดงประวัติทั้งแชท (ต่างจากคำตอบเดี่ยวปกติ) ---------- */
+.chat-msg {
+    margin-bottom: 16px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    line-height: 1.6;
+}
+
+.chat-msg-user {
+    background: #f4f4f4;
+    font-weight: bold;
+}
+
+.chat-msg-assistant {
+    background: #fff;
+    border: 1px solid #eee;
+}
