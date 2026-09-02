@@ -141,3 +141,194 @@ button {
     padding: 6px 8px;
     font-size: 14px;
 }
+
+/* ---------- Admin: KB toolbar (เพิ่ม chunk เดี่ยว / bulk import) ---------- */
+.kb-toolbar {
+    margin-bottom: 15px;
+}
+
+.kb-toolbar-section {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    margin-bottom: 8px;
+    padding: 10px 15px;
+}
+
+.kb-toolbar-section summary {
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.kb-toolbar-body {
+    margin-top: 10px;
+}
+
+.kb-toolbar-body .kb-textarea {
+    min-height: 60px;
+    margin-bottom: 8px;
+}
+
+.kb-toolbar-status {
+    margin-left: 10px;
+    font-size: 13px;
+}
+
+.ts-note {
+    font-size: 13px;
+    color: #888;
+    margin: 0 0 8px;
+}
+
+/* ---------- Sidebar: ปุ่มเปิดเมนู (hamburger, ลอยมุมซ้ายบนเสมอ) ---------- */
+#sidebarToggle {
+    position: fixed;
+    top: 16px;
+    left: 16px;
+    z-index: 30;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.hamburger-line {
+    display: block;
+    width: 18px;
+    height: 2px;
+    background: #1a1a1a;
+}
+
+/* ---------- Sidebar: พื้นหลังมืดตอนเปิด ---------- */
+#sidebarBackdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 20;
+}
+
+/* ---------- Sidebar: แผงเมนูหลัก ---------- */
+#sideMenu {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 260px;
+    background: #fff;
+    border-right: 1px solid #ddd;
+    z-index: 25;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+}
+
+#sideMenu.open {
+    transform: translateX(0);
+}
+
+.side-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+    border-bottom: 1px solid #eee;
+}
+
+.side-brand {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+#sidebarClose {
+    background: none;
+    border: none;
+    padding: 4px 8px;
+    font-size: 16px;
+}
+
+/* พื้นที่รายการแชท — โตได้ตามเนื้อหาในอนาคต เลื่อนได้เองถ้ายาวเกิน */
+.side-middle {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.side-section-label {
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 8px;
+}
+
+#chatHistoryList {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#chatHistoryList li {
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 2px;
+    cursor: pointer;
+}
+
+#chatHistoryList li:hover {
+    background: #f4f4f4;
+}
+
+.side-empty {
+    color: #999;
+    cursor: default !important;
+}
+
+.side-empty:hover {
+    background: none !important;
+}
+
+/* พื้นที่ผู้ใช้ด้านล่างสุด */
+.side-bottom {
+    border-top: 1px solid #eee;
+    padding: 16px;
+}
+
+.side-auth-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.side-auth-buttons button {
+    width: 100%;
+    font-size: 14px;
+    padding: 8px;
+}
+
+.side-user-info {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.side-user-email {
+    font-size: 13px;
+    color: #444;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.side-signout-btn {
+    font-size: 13px;
+    padding: 6px 10px;
+    flex-shrink: 0;
+}
