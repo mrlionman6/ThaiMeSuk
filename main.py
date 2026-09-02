@@ -13,10 +13,22 @@ from db import (
     log_low_confidence_query,
     approve_log as db_approve_log,   # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
     reject_log as db_reject_log,     # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
+    create_user,
+    get_user_by_email,
+    get_user_by_id,
+    create_chat_session,
+    touch_chat_session,
+    get_user_chats,
+    get_chat_session,
+    add_chat_message,
+    get_chat_messages,
+    delete_chat_session,
 )
 
 import os
 import json
+import bcrypt
+from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Form, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, RedirectResponse
@@ -40,12 +52,26 @@ print("โหลดโมเดลสำเร็จ")
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "159753852456")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "1234")
 
 def require_login(request: Request):
     if not request.session.get("logged_in"):
         raise HTTPException(status_code=401, detail="Not logged in")
     return True
+
+# ---------- User auth (แยกจาก admin โดยสิ้นเชิง — คนละ session key, คนละระบบ) ----------
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+def verify_password(password: str, password_hash: str) -> bool:
+    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+
+def require_user(request: Request) -> int:
+    """dependency สำหรับ endpoint ที่ต้อง login เป็น user (ไม่ใช่ admin) — คืนค่า user_id"""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    return user_id
 
 # ---------- Knowledge Base ----------
 # ไม่โหลดจากไฟล์ JSON ตอน import แล้ว — ข้อมูลจะถูกโหลดจาก DB ตอน startup event (ด้านล่าง)
@@ -140,6 +166,7 @@ def rag_answer(query):
 # ---------- Pydantic Models (ต้องประกาศก่อนใช้งานด้านล่าง) ----------
 class Question(BaseModel):
     query: str
+    chat_id: Optional[int] = None
 
 class LogAction(BaseModel):
     log_id: int
@@ -150,11 +177,109 @@ class KBUpdate(BaseModel):
 class KBCreate(BaseModel):
     content: str
 
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class ChatCreateRequest(BaseModel):
+    title: Optional[str] = None
+
 # ---------- User API ----------
 @app.post("/ask")
-def ask_question(question: Question):
+def ask_question(question: Question, request: Request):
     answer, sources = rag_answer(question.query)
-    return {"answer": answer, "sources": sources}
+
+    user_id = request.session.get("user_id")
+    chat_id = question.chat_id
+
+    if user_id:
+        if chat_id is None:
+            # ยังไม่มีแชทอยู่ (ผู้ใช้เพิ่งเริ่มถามคำถามแรก) — สร้างแชทใหม่ ตั้งชื่อจากคำถามแรก
+            title = question.query.strip()[:50] or "แชทใหม่"
+            chat_id = create_chat_session(user_id, title=title)
+        else:
+            # เช็คว่าแชทนี้เป็นของ user คนนี้จริง กัน user คนอื่นยัดข้อความใส่แชทของคนอื่น
+            if get_chat_session(chat_id, user_id) is None:
+                raise HTTPException(status_code=404, detail="ไม่พบแชทนี้")
+
+        add_chat_message(chat_id, "user", question.query)
+        add_chat_message(chat_id, "assistant", answer)
+        touch_chat_session(chat_id)
+
+    return {"answer": answer, "sources": sources, "chat_id": chat_id}
+
+# ---------- Auth API (สำหรับผู้ใช้ทั่วไป — แยกจาก admin) ----------
+@app.post("/api/auth/register")
+def register(body: RegisterRequest, request: Request):
+    email = body.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="อีเมลไม่ถูกต้อง")
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร")
+
+    password_hash = hash_password(body.password)
+    new_id = create_user(email, password_hash)
+    if new_id is None:
+        raise HTTPException(status_code=409, detail="อีเมลนี้มีผู้ใช้งานแล้ว")
+
+    request.session["user_id"] = new_id
+    return {"status": "registered", "user": {"id": new_id, "email": email}}
+
+@app.post("/api/auth/login")
+def user_login(body: LoginRequest, request: Request):
+    email = body.email.strip().lower()
+    user = get_user_by_email(email)
+    if user is None or not verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="อีเมลหรือรหัสผ่านไม่ถูกต้อง")
+
+    request.session["user_id"] = user["id"]
+    return {"status": "logged_in", "user": {"id": user["id"], "email": user["email"]}}
+
+@app.post("/api/auth/logout")
+def user_logout(request: Request):
+    request.session.pop("user_id", None)
+    return {"status": "logged_out"}
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return {"logged_in": False}
+    user = get_user_by_id(user_id)
+    if user is None:
+        request.session.pop("user_id", None)  # user ถูกลบไปแล้วแต่ session ยังค้าง — ล้างทิ้ง
+        return {"logged_in": False}
+    return {"logged_in": True, "user": user}
+
+# ---------- Chat API (ต้อง login เป็น user ก่อนทุก endpoint) ----------
+@app.get("/api/chats")
+def list_chats(user_id: int = Depends(require_user)):
+    return {"chats": get_user_chats(user_id)}
+
+@app.post("/api/chats")
+def create_chat(body: ChatCreateRequest, user_id: int = Depends(require_user)):
+    title = (body.title or "แชทใหม่").strip()[:100]
+    new_id = create_chat_session(user_id, title=title)
+    return {"status": "created", "id": new_id}
+
+@app.get("/api/chats/{chat_id}")
+def get_chat(chat_id: int, user_id: int = Depends(require_user)):
+    chat = get_chat_session(chat_id, user_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="ไม่พบแชทนี้")
+    messages = get_chat_messages(chat_id)
+    return {"chat": chat, "messages": messages}
+
+@app.delete("/api/chats/{chat_id}")
+def remove_chat(chat_id: int, user_id: int = Depends(require_user)):
+    ok = delete_chat_session(chat_id, user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="ไม่พบแชทนี้")
+    return {"status": "deleted"}
 
 # ---------- Startup Event ----------
 @app.on_event("startup")
