@@ -139,6 +139,74 @@ async function loadKb(page = 1) {
     }
 }
 
+// ---------- เพิ่ม chunk เดี่ยว ----------
+async function addSingleChunk() {
+    const textarea = document.getElementById("newChunkText");
+    const statusEl = document.getElementById("addChunkStatus");
+    const content = textarea.value.trim();
+
+    if (!content) {
+        statusEl.textContent = "พิมพ์เนื้อหาก่อนกดเพิ่ม";
+        statusEl.style.color = "red";
+        return;
+    }
+
+    statusEl.textContent = "กำลังเพิ่ม...";
+    statusEl.style.color = "#666";
+
+    try {
+        const res = await fetch("/admin/api/kb", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content })
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+
+        textarea.value = "";
+        statusEl.textContent = "✅ เพิ่มแล้ว";
+        statusEl.style.color = "green";
+        loadKb(1); // chunk ใหม่ id สูงสุด ไปโผล่หน้าสุดท้ายปกติ แต่กลับไปหน้า 1 ให้เห็นผลชัดเจนว่าเพิ่มสำเร็จ
+    } catch (error) {
+        statusEl.textContent = "❌ เพิ่มไม่สำเร็จ: " + error;
+        statusEl.style.color = "red";
+    }
+}
+
+// ---------- Import หลาย chunk จากไฟล์ ----------
+async function bulkImportChunks() {
+    const fileInput = document.getElementById("bulkFileInput");
+    const statusEl = document.getElementById("bulkImportStatus");
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+        statusEl.textContent = "เลือกไฟล์ก่อน";
+        statusEl.style.color = "red";
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+
+    statusEl.textContent = "กำลัง import... (อาจใช้เวลาสักครู่ถ้าไฟล์ใหญ่)";
+    statusEl.style.color = "#666";
+
+    try {
+        const res = await fetch("/admin/api/kb/bulk", {
+            method: "POST",
+            body: formData
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+
+        fileInput.value = "";
+        statusEl.textContent = `✅ import สำเร็จ ${data.count} chunk`;
+        statusEl.style.color = "green";
+        loadKb(1);
+    } catch (error) {
+        statusEl.textContent = "❌ import ไม่สำเร็จ: " + error;
+        statusEl.style.color = "red";
+    }
+}
+
 async function saveKb(id) {
     const textarea = document.getElementById("kb-textarea-" + id);
     const newContent = textarea.value;
