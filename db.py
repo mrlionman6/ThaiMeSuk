@@ -131,6 +131,16 @@ def init_db():
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname VARCHAR"))
         conn.commit()
 
+    # บังคับ nickname ห้ามซ้ำกัน — ห่อ try/except เพราะถ้ามี nickname ซ้ำกันอยู่ก่อนแล้ว
+    # (เช่น user เก่าที่สมัครไว้ตอนยังไม่บังคับ unique) การสร้าง index จะ fail แต่ไม่ควรทำให้แอป crash ทั้งระบบ
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_nickname ON users(nickname)"))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"เตือน: สร้าง unique index ให้ nickname ไม่สำเร็จ (อาจมีชื่อซ้ำอยู่ก่อนแล้ว) — {e}")
+
     # Migration: เปลี่ยนจาก email เป็น username + เพิ่มระบบอนุมัติ/สิทธิ์ผู้ใช้
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE users ALTER COLUMN email DROP NOT NULL"))  # เลิกบังคับ email แล้ว
@@ -254,13 +264,14 @@ def get_vector_scores_for_all(query_embedding: list[float]) -> dict[int, float]:
 # หมายเหตุ: การ hash/verify password (bcrypt) ทำที่ main.py ไม่ใช่ที่นี่
 # เพราะเป็นเรื่อง auth logic ไม่ใช่ data access — db.py รับแค่ password_hash ที่ hash มาแล้ว
 
-def create_user(username: str, password_hash: str, nickname: str, requested_role: int) -> Optional[int]:
+def create_user(username: str, password_hash: str, nickname: str, requested_role: int):
     """สร้างคำขอสมัครสมาชิกใหม่ — status เริ่มต้นเป็น 'pending' เสมอ ต้องรอ admin อนุมัติก่อนถึง login ได้
-    คืนค่า None ถ้า username นี้มีคนใช้แล้ว"""
+    คืนค่า user id (int) ถ้าสำเร็จ, หรือ 'username_taken' / 'nickname_taken' (str) ถ้าซ้ำกับที่มีอยู่แล้ว"""
     with SessionLocal() as session:
-        existing = session.query(User).filter(User.username == username).first()
-        if existing:
-            return None
+        if session.query(User).filter(User.username == username).first():
+            return "username_taken"
+        if session.query(User).filter(User.nickname == nickname).first():
+            return "nickname_taken"
         row = User(
             username=username,
             password_hash=password_hash,
@@ -389,14 +400,22 @@ def update_user_role(user_id: int, role: int) -> bool:
         return True
 
 
-def update_user_nickname(user_id: int, nickname: str) -> bool:
+def update_user_nickname(user_id: int, nickname: str) -> str:
+    """คืนค่า 'ok' สำเร็จ, 'not_found' ไม่เจอ user, 'nickname_taken' ถ้าชื่อนี้มีคนอื่นใช้อยู่แล้ว"""
     with SessionLocal() as session:
         row = session.get(User, user_id)
         if row is None:
-            return False
+            return "not_found"
+        conflict = (
+            session.query(User)
+            .filter(User.nickname == nickname, User.id != user_id)
+            .first()
+        )
+        if conflict:
+            return "nickname_taken"
         row.nickname = nickname
         session.commit()
-        return True
+        return "ok"
 
 
 def delete_user(user_id: int) -> bool:
