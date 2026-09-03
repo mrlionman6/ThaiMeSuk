@@ -13,8 +13,10 @@ db.py — เลเยอร์เชื่อมต่อ PostgreSQL สำห�
         add_knowledge_chunk, update_knowledge_chunk, delete_knowledge_chunk,
         get_chunks_missing_embeddings, set_embedding, get_vector_scores_for_all,
         get_logs, get_logs_paginated, log_low_confidence_query, approve_log, reject_log,
-        create_user, get_user_by_email, get_user_by_id, update_user_password,
+        create_user, get_user_by_username, get_user_by_id, update_user_password,
         update_user_nickname, delete_user, save_security_answers, get_security_answers_for_user,
+        get_pending_user_requests, approve_user_request, reject_user_request,
+        get_approved_users, update_user_role,
         create_chat_session, touch_chat_session, get_user_chats, get_chat_session,
         add_chat_message, get_chat_messages, delete_chat_session,
     )
@@ -68,9 +70,13 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-    email = Column(String, nullable=False, unique=True, index=True)
+    username = Column(String, nullable=True, unique=True, index=True)  # login identifier ใหม่ แทน email
+    email = Column(String, nullable=True, unique=True, index=True)  # เก็บไว้เผื่อ backward-compat กับ user เก่า ไม่บังคับใช้แล้ว
     password_hash = Column(String, nullable=False)  # เก็บ bcrypt hash เท่านั้น ไม่เก็บ plain text
-    nickname = Column(String, nullable=True)  # nullable ที่ระดับ DB (กัน migration พังกับ user เก่า) แต่บังคับกรอกที่ระดับ app ตอนสมัคร
+    nickname = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="pending")  # pending | approved | rejected — ต้องรอ admin อนุมัติก่อน login ได้
+    requested_role = Column(Integer, nullable=True)  # ระดับสิทธิ์ที่ user ขอตอนสมัคร (1/2/3)
+    role = Column(Integer, nullable=True)  # ระดับสิทธิ์จริงที่ admin อนุมัติให้ (อาจต่างจาก requested_role)
     created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
 
 
@@ -123,6 +129,20 @@ def init_db():
     # ตาราง users อาจมีอยู่แล้วจากก่อนเพิ่ม column nickname (คนที่เคยสมัครทดสอบไปแล้ว) — ALTER TABLE เพิ่มเอง
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname VARCHAR"))
+        conn.commit()
+
+    # Migration: เปลี่ยนจาก email เป็น username + เพิ่มระบบอนุมัติ/สิทธิ์ผู้ใช้
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE users ALTER COLUMN email DROP NOT NULL"))  # เลิกบังคับ email แล้ว
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS requested_role INTEGER"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS role INTEGER"))
+        # grandfather: user ที่เคยสมัครไว้ก่อนมีระบบอนุมัติ (status ยังเป็น NULL) ให้ผ่านอัตโนมัติ
+        # ไม่งั้นจะ login ไม่ได้ทันทีหลัง deploy รอบนี้ทั้งที่เคยใช้งานได้ปกติมาก่อน
+        conn.execute(text("UPDATE users SET status = 'approved' WHERE status IS NULL"))
+        conn.execute(text("UPDATE users SET role = 3 WHERE role IS NULL AND status = 'approved'"))
         conn.commit()
 
 
@@ -234,26 +254,40 @@ def get_vector_scores_for_all(query_embedding: list[float]) -> dict[int, float]:
 # หมายเหตุ: การ hash/verify password (bcrypt) ทำที่ main.py ไม่ใช่ที่นี่
 # เพราะเป็นเรื่อง auth logic ไม่ใช่ data access — db.py รับแค่ password_hash ที่ hash มาแล้ว
 
-def create_user(email: str, password_hash: str, nickname: str) -> Optional[int]:
-    """สร้างผู้ใช้ใหม่ — คืนค่า None ถ้าอีเมลนี้มีคนใช้แล้ว (ไม่ throw exception ให้ caller เช็คง่ายๆ)"""
+def create_user(username: str, password_hash: str, nickname: str, requested_role: int) -> Optional[int]:
+    """สร้างคำขอสมัครสมาชิกใหม่ — status เริ่มต้นเป็น 'pending' เสมอ ต้องรอ admin อนุมัติก่อนถึง login ได้
+    คืนค่า None ถ้า username นี้มีคนใช้แล้ว"""
     with SessionLocal() as session:
-        existing = session.query(User).filter(User.email == email).first()
+        existing = session.query(User).filter(User.username == username).first()
         if existing:
             return None
-        row = User(email=email, password_hash=password_hash, nickname=nickname)
+        row = User(
+            username=username,
+            password_hash=password_hash,
+            nickname=nickname,
+            requested_role=requested_role,
+            status="pending",
+        )
         session.add(row)
         session.commit()
         session.refresh(row)
         return row.id
 
 
-def get_user_by_email(email: str) -> Optional[dict]:
+def get_user_by_username(username: str) -> Optional[dict]:
     """ใช้ตอน login/ลืมรหัสผ่าน — คืน password_hash มาด้วยเพื่อให้ main.py เอาไป verify"""
     with SessionLocal() as session:
-        row = session.query(User).filter(User.email == email).first()
+        row = session.query(User).filter(User.username == username).first()
         if row is None:
             return None
-        return {"id": row.id, "email": row.email, "password_hash": row.password_hash, "nickname": row.nickname}
+        return {
+            "id": row.id,
+            "username": row.username,
+            "password_hash": row.password_hash,
+            "nickname": row.nickname,
+            "status": row.status,
+            "role": row.role,
+        }
 
 
 def get_user_by_id(user_id: int) -> Optional[dict]:
@@ -262,7 +296,13 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
         row = session.get(User, user_id)
         if row is None:
             return None
-        return {"id": row.id, "email": row.email, "nickname": row.nickname}
+        return {
+            "id": row.id,
+            "username": row.username,
+            "nickname": row.nickname,
+            "status": row.status,
+            "role": row.role,
+        }
 
 
 def update_user_password(user_id: int, new_password_hash: str) -> bool:
@@ -272,6 +312,79 @@ def update_user_password(user_id: int, new_password_hash: str) -> bool:
         if row is None:
             return False
         row.password_hash = new_password_hash
+        session.commit()
+        return True
+
+
+# ---------- Admin: อนุมัติคำขอสมัครสมาชิก + จัดการสิทธิ์ ----------
+
+def get_pending_user_requests(page: int = 1, page_size: int = 10) -> dict:
+    """คำขอสมัครที่ยังไม่ได้ตัดสินใจ (status='pending') — ใช้แสดงในแท็บ 'คำขอสมัครสมาชิก'"""
+    with SessionLocal() as session:
+        q = session.query(User).filter(User.status == "pending").order_by(User.created_at.desc())
+        total = q.count()
+        rows = q.offset((page - 1) * page_size).limit(page_size).all()
+        items = [
+            {
+                "id": r.id,
+                "username": r.username,
+                "nickname": r.nickname,
+                "requested_role": r.requested_role,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+        return {"items": items, "total": total}
+
+
+def approve_user_request(user_id: int, granted_role: int) -> bool:
+    """อนุมัติคำขอ — ตั้ง status เป็น approved พร้อมให้สิทธิ์จริง (อาจต่างจาก requested_role ที่ user ขอมาได้)"""
+    with SessionLocal() as session:
+        row = session.get(User, user_id)
+        if row is None or row.status != "pending":
+            return False
+        row.status = "approved"
+        row.role = granted_role
+        session.commit()
+        return True
+
+
+def reject_user_request(user_id: int) -> bool:
+    with SessionLocal() as session:
+        row = session.get(User, user_id)
+        if row is None or row.status != "pending":
+            return False
+        row.status = "rejected"
+        session.commit()
+        return True
+
+
+def get_approved_users(page: int = 1, page_size: int = 10) -> dict:
+    """บัญชีที่อนุมัติแล้วทั้งหมด — ใช้แสดงในแท็บ 'จัดการบัญชี'"""
+    with SessionLocal() as session:
+        q = session.query(User).filter(User.status == "approved").order_by(User.created_at.desc())
+        total = q.count()
+        rows = q.offset((page - 1) * page_size).limit(page_size).all()
+        items = [
+            {
+                "id": r.id,
+                "username": r.username,
+                "nickname": r.nickname,
+                "role": r.role,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+        return {"items": items, "total": total}
+
+
+def update_user_role(user_id: int, role: int) -> bool:
+    """admin เปลี่ยนระดับสิทธิ์ของ user คนหนึ่งทีหลังได้ (ผ่านแท็บ 'จัดการบัญชี')"""
+    with SessionLocal() as session:
+        row = session.get(User, user_id)
+        if row is None:
+            return False
+        row.role = role
         session.commit()
         return True
 
