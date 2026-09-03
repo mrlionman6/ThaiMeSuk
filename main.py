@@ -16,6 +16,11 @@ from db import (
     create_user,
     get_user_by_email,
     get_user_by_id,
+    update_user_password,
+    update_user_nickname,
+    delete_user,
+    save_security_answers,
+    get_security_answers_for_user,
     create_chat_session,
     touch_chat_session,
     get_user_chats,
@@ -27,6 +32,8 @@ from db import (
 
 import os
 import json
+import time
+import random
 import bcrypt
 from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Form, UploadFile, File
@@ -41,7 +48,27 @@ import numpy as np
 from starlette.middleware.sessions import SessionMiddleware
 
 app = FastAPI()
-app.add_middleware(SessionMiddleware, secret_key=os.environ.get("SESSION_SECRET", "change-this-secret-key"))
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("SESSION_SECRET", "change-this-secret-key"),
+    max_age=None,  # ไม่ตั้งวันหมดอายุยาว — ให้เป็น session cookie ที่หายไปเมื่อปิด browser จริง
+)
+
+# ---------- Security questions สำหรับลืมรหัสผ่าน (ไม่ใช้อีเมล) ----------
+SECURITY_QUESTIONS = {
+    1: "ชื่อสัตว์เลี้ยงตัวแรกของคุณคืออะไร",
+    2: "โรงเรียนประถมที่คุณเรียนชื่ออะไร",
+    3: "ชื่อกลางของคุณ (ถ้ามี) คืออะไร",
+    4: "อาหารจานโปรดตอนเด็กของคุณคืออะไร",
+    5: "ชื่อเพื่อนสนิทคนแรกของคุณคือใคร",
+    6: "คุณเกิดที่จังหวัดอะไร",
+    7: "ชื่อครูที่คุณชอบที่สุดคือใคร",
+    8: "รถคันแรกที่คุณขับ (หรืออยากได้) ยี่ห้ออะไร",
+    9: "เมืองในฝันที่อยากไปเที่ยวคือที่ไหน",
+    10: "ของเล่นชิ้นโปรดตอนเด็กของคุณคืออะไร",
+}
+REQUIRED_SECURITY_ANSWERS = 5  # ต้องเลือกตอบให้ครบเท่านี้ตอนสมัคร
+SESSION_TIMEOUT_SECONDS = 8 * 60 * 60  # auto-logout ถ้าไม่ใช้งานเกิน 8 ชั่วโมง
 
 # ---------- โหลดโมเดล ----------
 print("กำลังโหลดโมเดล...")
@@ -67,11 +94,35 @@ def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
 
 def require_user(request: Request) -> int:
-    """dependency สำหรับ endpoint ที่ต้อง login เป็น user (ไม่ใช่ admin) — คืนค่า user_id"""
-    user_id = request.session.get("user_id")
+    """dependency สำหรับ endpoint ที่ต้อง login เป็น user (ไม่ใช่ admin) — คืนค่า user_id
+    เช็ค inactivity timeout ด้วย (8 ชม.) — ถ้าเกินจะ logout อัตโนมัติ"""
+    user_id = get_active_user_id(request)
     if not user_id:
         raise HTTPException(status_code=401, detail="Not logged in")
     return user_id
+
+def get_active_user_id(request: Request) -> Optional[int]:
+    """คืน user_id ถ้า session ยัง valid (ไม่เกิน SESSION_TIMEOUT_SECONDS นับจากใช้งานล่าสุด)
+    ถ้าเกิน timeout จะเคลียร์ session แล้วคืน None (เท่ากับ logout อัตโนมัติ)
+    เรียกใช้แทนการอ่าน request.session.get('user_id') ตรงๆ ทุกจุดที่เกี่ยวกับ user auth"""
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+
+    last_active = request.session.get("last_active")
+    now = time.time()
+    if last_active is not None and (now - last_active) > SESSION_TIMEOUT_SECONDS:
+        request.session.pop("user_id", None)
+        request.session.pop("last_active", None)
+        return None
+
+    request.session["last_active"] = now
+    return user_id
+
+def normalize_answer(answer: str) -> str:
+    """ทำให้คำตอบ security question เทียบกันได้ไม่ติดเรื่องตัวพิมพ์เล็ก-ใหญ่/ช่องว่างหัวท้าย
+    เรียกก่อน hash เสมอ ทั้งตอนสมัครและตอนเช็คตอนลืมรหัสผ่าน"""
+    return answer.strip().lower()
 
 # ---------- Knowledge Base ----------
 # ไม่โหลดจากไฟล์ JSON ตอน import แล้ว — ข้อมูลจะถูกโหลดจาก DB ตอน startup event (ด้านล่าง)
@@ -177,9 +228,15 @@ class KBUpdate(BaseModel):
 class KBCreate(BaseModel):
     content: str
 
+class SecurityAnswerInput(BaseModel):
+    question_id: int
+    answer: str
+
 class RegisterRequest(BaseModel):
     email: str
     password: str
+    nickname: str
+    security_answers: list[SecurityAnswerInput]
 
 class LoginRequest(BaseModel):
     email: str
@@ -188,12 +245,30 @@ class LoginRequest(BaseModel):
 class ChatCreateRequest(BaseModel):
     title: Optional[str] = None
 
+class ForgotPasswordQuestionsRequest(BaseModel):
+    email: str
+
+class ForgotPasswordResetRequest(BaseModel):
+    email: str
+    answers: list[SecurityAnswerInput]
+    new_password: str
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+class UpdateNicknameRequest(BaseModel):
+    nickname: str
+
 # ---------- User API ----------
 @app.post("/ask")
 def ask_question(question: Question, request: Request):
     answer, sources = rag_answer(question.query)
 
-    user_id = request.session.get("user_id")
+    user_id = get_active_user_id(request)
     chat_id = question.chat_id
 
     if user_id:
@@ -213,6 +288,11 @@ def ask_question(question: Question, request: Request):
     return {"answer": answer, "sources": sources, "chat_id": chat_id}
 
 # ---------- Auth API (สำหรับผู้ใช้ทั่วไป — แยกจาก admin) ----------
+@app.get("/api/auth/security-questions")
+def list_security_questions():
+    """คืนรายการคำถามทั้ง 10 ข้อ (ไม่มีคำตอบ) — ใช้ตอน render ฟอร์มสมัคร"""
+    return {"questions": [{"id": qid, "text": text} for qid, text in SECURITY_QUESTIONS.items()]}
+
 @app.post("/api/auth/register")
 def register(body: RegisterRequest, request: Request):
     email = body.email.strip().lower()
@@ -221,13 +301,38 @@ def register(body: RegisterRequest, request: Request):
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร")
 
+    nickname = body.nickname.strip()
+    if not nickname:
+        raise HTTPException(status_code=400, detail="กรุณาตั้งชื่อเล่น (nickname)")
+
+    if len(body.security_answers) != REQUIRED_SECURITY_ANSWERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"ต้องเลือกตอบคำถามกันลืมรหัสผ่านให้ครบ {REQUIRED_SECURITY_ANSWERS} ข้อ",
+        )
+
+    question_ids = [a.question_id for a in body.security_answers]
+    if len(set(question_ids)) != len(question_ids):
+        raise HTTPException(status_code=400, detail="เลือกคำถามซ้ำกันไม่ได้")
+    if any(qid not in SECURITY_QUESTIONS for qid in question_ids):
+        raise HTTPException(status_code=400, detail="มีคำถามที่ไม่ถูกต้องอยู่ในรายการ")
+    if any(not a.answer.strip() for a in body.security_answers):
+        raise HTTPException(status_code=400, detail="ตอบคำถามกันลืมรหัสผ่านให้ครบทุกข้อที่เลือก")
+
     password_hash = hash_password(body.password)
-    new_id = create_user(email, password_hash)
+    new_id = create_user(email, password_hash, nickname)
     if new_id is None:
         raise HTTPException(status_code=409, detail="อีเมลนี้มีผู้ใช้งานแล้ว")
 
+    answer_records = [
+        {"question_id": a.question_id, "answer_hash": hash_password(normalize_answer(a.answer))}
+        for a in body.security_answers
+    ]
+    save_security_answers(new_id, answer_records)
+
     request.session["user_id"] = new_id
-    return {"status": "registered", "user": {"id": new_id, "email": email}}
+    request.session["last_active"] = time.time()
+    return {"status": "registered", "user": {"id": new_id, "email": email, "nickname": nickname}}
 
 @app.post("/api/auth/login")
 def user_login(body: LoginRequest, request: Request):
@@ -237,16 +342,18 @@ def user_login(body: LoginRequest, request: Request):
         raise HTTPException(status_code=401, detail="อีเมลหรือรหัสผ่านไม่ถูกต้อง")
 
     request.session["user_id"] = user["id"]
-    return {"status": "logged_in", "user": {"id": user["id"], "email": user["email"]}}
+    request.session["last_active"] = time.time()
+    return {"status": "logged_in", "user": {"id": user["id"], "email": user["email"], "nickname": user["nickname"]}}
 
 @app.post("/api/auth/logout")
 def user_logout(request: Request):
     request.session.pop("user_id", None)
+    request.session.pop("last_active", None)
     return {"status": "logged_out"}
 
 @app.get("/api/auth/me")
 def auth_me(request: Request):
-    user_id = request.session.get("user_id")
+    user_id = get_active_user_id(request)
     if not user_id:
         return {"logged_in": False}
     user = get_user_by_id(user_id)
@@ -254,6 +361,85 @@ def auth_me(request: Request):
         request.session.pop("user_id", None)  # user ถูกลบไปแล้วแต่ session ยังค้าง — ล้างทิ้ง
         return {"logged_in": False}
     return {"logged_in": True, "user": user}
+
+# ---------- ลืมรหัสผ่าน (ผ่าน security questions ไม่ใช้อีเมล) ----------
+@app.post("/api/auth/forgot-password/questions")
+def forgot_password_questions(body: ForgotPasswordQuestionsRequest):
+    """สุ่ม 2 ข้อจาก 5 ข้อที่ user เคยตั้งไว้ตอนสมัคร มาให้ตอบยืนยันตัวตน"""
+    email = body.email.strip().lower()
+    user = get_user_by_email(email)
+    if user is None:
+        # ไม่บอกตรงๆ ว่าไม่เจออีเมล กันคนสุ่มเช็คว่าอีเมลไหนมีในระบบ (user enumeration)
+        raise HTTPException(status_code=404, detail="ไม่พบบัญชีนี้ หรือข้อมูลไม่ถูกต้อง")
+
+    answers = get_security_answers_for_user(user["id"])
+    if len(answers) < 2:
+        raise HTTPException(status_code=400, detail="บัญชีนี้ยังไม่มีคำถามกันลืมรหัสผ่านเพียงพอ")
+
+    chosen = random.sample(answers, 2)
+    questions = [
+        {"question_id": a["question_id"], "text": SECURITY_QUESTIONS.get(a["question_id"], "")}
+        for a in chosen
+    ]
+    return {"questions": questions}
+
+@app.post("/api/auth/forgot-password/reset")
+def forgot_password_reset(body: ForgotPasswordResetRequest):
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร")
+    if len(body.answers) != 2:
+        raise HTTPException(status_code=400, detail="ต้องตอบคำถามให้ครบ 2 ข้อ")
+
+    email = body.email.strip().lower()
+    user = get_user_by_email(email)
+    if user is None:
+        raise HTTPException(status_code=404, detail="ไม่พบบัญชีนี้ หรือข้อมูลไม่ถูกต้อง")
+
+    stored_answers = {a["question_id"]: a["answer_hash"] for a in get_security_answers_for_user(user["id"])}
+
+    for given in body.answers:
+        stored_hash = stored_answers.get(given.question_id)
+        if stored_hash is None or not verify_password(normalize_answer(given.answer), stored_hash):
+            raise HTTPException(status_code=401, detail="คำตอบไม่ถูกต้อง")
+
+    new_hash = hash_password(body.new_password)
+    update_user_password(user["id"], new_hash)
+    return {"status": "password_reset"}
+
+# ---------- Profile: เปลี่ยนรหัสผ่าน / เปลี่ยน nickname / ลบบัญชี (ต้อง login) ----------
+@app.post("/api/auth/change-password")
+def change_password(body: ChangePasswordRequest, user_id: int = Depends(require_user)):
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร")
+
+    user = get_user_by_id(user_id)
+    full_user = get_user_by_email(user["email"])  # ต้องดึงผ่าน email เพราะ get_user_by_id ไม่คืน password_hash
+    if not verify_password(body.current_password, full_user["password_hash"]):
+        raise HTTPException(status_code=401, detail="รหัสผ่านปัจจุบันไม่ถูกต้อง")
+
+    new_hash = hash_password(body.new_password)
+    update_user_password(user_id, new_hash)
+    return {"status": "password_changed"}
+
+@app.post("/api/auth/update-nickname")
+def update_nickname(body: UpdateNicknameRequest, user_id: int = Depends(require_user)):
+    nickname = body.nickname.strip()
+    if not nickname:
+        raise HTTPException(status_code=400, detail="ชื่อเล่นห้ามว่างเปล่า")
+    update_user_nickname(user_id, nickname)
+    return {"status": "nickname_updated", "nickname": nickname}
+
+@app.delete("/api/auth/account")
+def delete_account(body: DeleteAccountRequest, request: Request, user_id: int = Depends(require_user)):
+    user = get_user_by_id(user_id)
+    full_user = get_user_by_email(user["email"])
+    if not verify_password(body.password, full_user["password_hash"]):
+        raise HTTPException(status_code=401, detail="รหัสผ่านไม่ถูกต้อง")
+
+    delete_user(user_id)  # ON DELETE CASCADE ลบ chat/security answers ที่เกี่ยวข้องทั้งหมดให้เอง
+    request.session.pop("user_id", None)
+    request.session.pop("last_active", None)
+    return {"status": "account_deleted"}
 
 # ---------- Chat API (ต้อง login เป็น user ก่อนทุก endpoint) ----------
 @app.get("/api/chats")
