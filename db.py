@@ -13,6 +13,10 @@ db.py — เลเยอร์เชื่อมต่อ PostgreSQL สำห�
         add_knowledge_chunk, update_knowledge_chunk, delete_knowledge_chunk,
         get_chunks_missing_embeddings, set_embedding, get_vector_scores_for_all,
         get_logs, get_logs_paginated, log_low_confidence_query, approve_log, reject_log,
+        create_user, get_user_by_email, get_user_by_id, update_user_password,
+        update_user_nickname, delete_user, save_security_answers, get_security_answers_for_user,
+        create_chat_session, touch_chat_session, get_user_chats, get_chat_session,
+        add_chat_message, get_chat_messages, delete_chat_session,
     )
 """
 
@@ -66,7 +70,17 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     email = Column(String, nullable=False, unique=True, index=True)
     password_hash = Column(String, nullable=False)  # เก็บ bcrypt hash เท่านั้น ไม่เก็บ plain text
+    nickname = Column(String, nullable=True)  # nullable ที่ระดับ DB (กัน migration พังกับ user เก่า) แต่บังคับกรอกที่ระดับ app ตอนสมัคร
     created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+
+
+class UserSecurityAnswer(Base):
+    __tablename__ = "user_security_answers"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    question_id = Column(Integer, nullable=False)  # อ้างอิง SECURITY_QUESTIONS ใน main.py (id 1-10)
+    answer_hash = Column(String, nullable=False)  # เก็บ bcrypt hash ของคำตอบ (normalize แล้ว) ไม่เก็บ plain text
 
 
 class ChatSession(Base):
@@ -104,6 +118,11 @@ def init_db():
         conn.execute(text(
             f"ALTER TABLE knowledge_base ADD COLUMN IF NOT EXISTS embedding vector({EMBEDDING_DIM})"
         ))
+        conn.commit()
+
+    # ตาราง users อาจมีอยู่แล้วจากก่อนเพิ่ม column nickname (คนที่เคยสมัครทดสอบไปแล้ว) — ALTER TABLE เพิ่มเอง
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname VARCHAR"))
         conn.commit()
 
 
@@ -215,13 +234,13 @@ def get_vector_scores_for_all(query_embedding: list[float]) -> dict[int, float]:
 # หมายเหตุ: การ hash/verify password (bcrypt) ทำที่ main.py ไม่ใช่ที่นี่
 # เพราะเป็นเรื่อง auth logic ไม่ใช่ data access — db.py รับแค่ password_hash ที่ hash มาแล้ว
 
-def create_user(email: str, password_hash: str) -> Optional[int]:
+def create_user(email: str, password_hash: str, nickname: str) -> Optional[int]:
     """สร้างผู้ใช้ใหม่ — คืนค่า None ถ้าอีเมลนี้มีคนใช้แล้ว (ไม่ throw exception ให้ caller เช็คง่ายๆ)"""
     with SessionLocal() as session:
         existing = session.query(User).filter(User.email == email).first()
         if existing:
             return None
-        row = User(email=email, password_hash=password_hash)
+        row = User(email=email, password_hash=password_hash, nickname=nickname)
         session.add(row)
         session.commit()
         session.refresh(row)
@@ -229,12 +248,12 @@ def create_user(email: str, password_hash: str) -> Optional[int]:
 
 
 def get_user_by_email(email: str) -> Optional[dict]:
-    """ใช้ตอน login — คืน password_hash มาด้วยเพื่อให้ main.py เอาไป verify"""
+    """ใช้ตอน login/ลืมรหัสผ่าน — คืน password_hash มาด้วยเพื่อให้ main.py เอาไป verify"""
     with SessionLocal() as session:
         row = session.query(User).filter(User.email == email).first()
         if row is None:
             return None
-        return {"id": row.id, "email": row.email, "password_hash": row.password_hash}
+        return {"id": row.id, "email": row.email, "password_hash": row.password_hash, "nickname": row.nickname}
 
 
 def get_user_by_id(user_id: int) -> Optional[dict]:
@@ -243,7 +262,62 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
         row = session.get(User, user_id)
         if row is None:
             return None
-        return {"id": row.id, "email": row.email}
+        return {"id": row.id, "email": row.email, "nickname": row.nickname}
+
+
+def update_user_password(user_id: int, new_password_hash: str) -> bool:
+    """ใช้ทั้งตอนเปลี่ยนรหัสผ่านปกติ (login อยู่) และตอนตั้งรหัสผ่านใหม่ผ่าน security questions"""
+    with SessionLocal() as session:
+        row = session.get(User, user_id)
+        if row is None:
+            return False
+        row.password_hash = new_password_hash
+        session.commit()
+        return True
+
+
+def update_user_nickname(user_id: int, nickname: str) -> bool:
+    with SessionLocal() as session:
+        row = session.get(User, user_id)
+        if row is None:
+            return False
+        row.nickname = nickname
+        session.commit()
+        return True
+
+
+def delete_user(user_id: int) -> bool:
+    """ลบบัญชีถาวร — ON DELETE CASCADE ลบ chat_sessions (+ chat_messages ที่ผูกอยู่)
+    และ user_security_answers ที่เกี่ยวข้องทั้งหมดให้เองที่ระดับ DB"""
+    with SessionLocal() as session:
+        row = session.get(User, user_id)
+        if row is None:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
+
+
+# ---------- Security questions (สำหรับลืมรหัสผ่าน — ไม่ใช้อีเมล) ----------
+
+def save_security_answers(user_id: int, answers: list[dict]):
+    """answers: [{"question_id": int, "answer_hash": str}, ...] — เรียกครั้งเดียวตอนสมัคร"""
+    with SessionLocal() as session:
+        for a in answers:
+            row = UserSecurityAnswer(
+                user_id=user_id,
+                question_id=a["question_id"],
+                answer_hash=a["answer_hash"],
+            )
+            session.add(row)
+        session.commit()
+
+
+def get_security_answers_for_user(user_id: int) -> list[dict]:
+    """คืน question_id + answer_hash ทั้งหมดที่ user คนนี้เคยตั้งไว้ (5 ข้อ)"""
+    with SessionLocal() as session:
+        rows = session.query(UserSecurityAnswer).filter(UserSecurityAnswer.user_id == user_id).all()
+        return [{"question_id": r.question_id, "answer_hash": r.answer_hash} for r in rows]
 
 
 # ---------- Chat sessions & messages ----------
