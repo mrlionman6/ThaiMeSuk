@@ -1,3 +1,9 @@
+/* ป้องกัน CSS ตัวอื่นทับ attribute "hidden" ของ HTML โดยไม่ตั้งใจ
+   (ตัวการเดิม: .modal-backdrop สั่ง display:flex ตรงๆ ไปทับ display:none ที่ hidden ควรให้) */
+[hidden] {
+    display: none !important;
+}
+
 body {
     font-family: sans-serif;
     max-width: 600px;
