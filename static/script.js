@@ -64,7 +64,18 @@ function closeSidebar() {
 
 document.getElementById("sidebarToggle").addEventListener("click", openSidebar);
 document.getElementById("sidebarClose").addEventListener("click", closeSidebar);
-document.getElementById("sidebarBackdrop").addEventListener("click", closeSidebar);
+let sidebarMouseDownOnBackdrop = false;
+
+document.getElementById("sidebarBackdrop").addEventListener("mousedown", (e) => {
+    sidebarMouseDownOnBackdrop = (e.target.id === "sidebarBackdrop");
+});
+
+document.getElementById("sidebarBackdrop").addEventListener("click", (e) => {
+    if (e.target.id === "sidebarBackdrop" && sidebarMouseDownOnBackdrop) {
+        closeSidebar();
+    }
+    sidebarMouseDownOnBackdrop = false;
+});
 document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
         closeSidebar();
@@ -85,8 +96,20 @@ function closeModal() {
     document.getElementById("modalContent").innerHTML = "";
 }
 
+// เช็คทั้ง mousedown และ click ต้องเกิดบน backdrop เดียวกัน ถึงจะปิด modal
+// (ถ้าเช็คแค่ click อย่างเดียว: ลาก select ข้อความในกล่องแล้วปล่อยเมาส์นอกกล่อง
+// จะถูกนับเป็น "คลิกที่ backdrop" ทั้งที่ตั้งใจแค่ลากเลือกข้อความ ไม่ได้ตั้งใจปิด)
+let modalMouseDownOnBackdrop = false;
+
+document.getElementById("modalBackdrop").addEventListener("mousedown", (e) => {
+    modalMouseDownOnBackdrop = (e.target.id === "modalBackdrop");
+});
+
 document.getElementById("modalBackdrop").addEventListener("click", (e) => {
-    if (e.target.id === "modalBackdrop") closeModal();
+    if (e.target.id === "modalBackdrop" && modalMouseDownOnBackdrop) {
+        closeModal();
+    }
+    modalMouseDownOnBackdrop = false;
 });
 
 // =====================================================================
