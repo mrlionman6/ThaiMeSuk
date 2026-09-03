@@ -26,6 +26,8 @@ from db import (
     reject_user_request,
     get_approved_users,
     update_user_role,
+    block_user,
+    unblock_user,
     create_chat_session,
     touch_chat_session,
     get_user_chats,
@@ -112,9 +114,17 @@ def require_user(request: Request) -> int:
         raise HTTPException(status_code=401, detail="Not logged in")
     return user_id
 
+def _clear_user_session(request: Request):
+    """ล้าง session ของ user (ไม่แตะ admin session) — เรียกรวมจุดเดียวกันทุกที่ที่ต้อง logout"""
+    request.session.pop("user_id", None)
+    request.session.pop("last_active", None)
+    request.session.pop("session_version", None)
+
 def get_active_user_id(request: Request) -> Optional[int]:
-    """คืน user_id ถ้า session ยัง valid (ไม่เกิน SESSION_TIMEOUT_SECONDS นับจากใช้งานล่าสุด)
-    ถ้าเกิน timeout จะเคลียร์ session แล้วคืน None (เท่ากับ logout อัตโนมัติ)
+    """คืน user_id ถ้า session ยัง valid ทั้ง 3 เงื่อนไข:
+    1. ไม่เกิน SESSION_TIMEOUT_SECONDS นับจากใช้งานล่าสุด (inactivity timeout)
+    2. บัญชียัง status='approved' อยู่ (ไม่ถูกลบ/block/reject)
+    3. session_version ใน cookie ตรงกับใน DB (ถ้า admin เพิ่งกด block/unblock เลขจะไม่ตรง = บังคับ logout)
     เรียกใช้แทนการอ่าน request.session.get('user_id') ตรงๆ ทุกจุดที่เกี่ยวกับ user auth"""
     user_id = request.session.get("user_id")
     if not user_id:
@@ -123,8 +133,15 @@ def get_active_user_id(request: Request) -> Optional[int]:
     last_active = request.session.get("last_active")
     now = time.time()
     if last_active is not None and (now - last_active) > SESSION_TIMEOUT_SECONDS:
-        request.session.pop("user_id", None)
-        request.session.pop("last_active", None)
+        _clear_user_session(request)
+        return None
+
+    user = get_user_by_id(user_id)
+    if user is None or user["status"] != "approved":
+        _clear_user_session(request)
+        return None
+    if request.session.get("session_version") != user["session_version"]:
+        _clear_user_session(request)
         return None
 
     request.session["last_active"] = now
@@ -404,9 +421,12 @@ def user_login(body: LoginRequest, request: Request):
         raise HTTPException(status_code=403, detail="บัญชีนี้ยังรอการอนุมัติจากผู้ดูแลระบบ")
     if user["status"] == "rejected":
         raise HTTPException(status_code=403, detail="คำขอสมัครสมาชิกนี้ถูกปฏิเสธ")
+    if user["status"] == "blocked":
+        raise HTTPException(status_code=403, detail="บัญชีนี้ถูกระงับการใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบ")
 
     request.session["user_id"] = user["id"]
     request.session["last_active"] = time.time()
+    request.session["session_version"] = user["session_version"]
     return {
         "status": "logged_in",
         "user": {"id": user["id"], "username": user["username"], "nickname": user["nickname"], "role": user["role"]},
@@ -414,8 +434,7 @@ def user_login(body: LoginRequest, request: Request):
 
 @app.post("/api/auth/logout")
 def user_logout(request: Request):
-    request.session.pop("user_id", None)
-    request.session.pop("last_active", None)
+    _clear_user_session(request)
     return {"status": "logged_out"}
 
 @app.get("/api/auth/me")
@@ -425,7 +444,7 @@ def auth_me(request: Request):
         return {"logged_in": False}
     user = get_user_by_id(user_id)
     if user is None:
-        request.session.pop("user_id", None)  # user ถูกลบไปแล้วแต่ session ยังค้าง — ล้างทิ้ง
+        _clear_user_session(request)  # user ถูกลบไปแล้วแต่ session ยังค้าง — ล้างทิ้ง
         return {"logged_in": False}
     return {"logged_in": True, "user": user}
 
@@ -508,8 +527,7 @@ def delete_account(body: DeleteAccountRequest, request: Request, user_id: int = 
         raise HTTPException(status_code=401, detail="รหัสผ่านไม่ถูกต้อง")
 
     delete_user(user_id)  # ON DELETE CASCADE ลบ chat/security answers ที่เกี่ยวข้องทั้งหมดให้เอง
-    request.session.pop("user_id", None)
-    request.session.pop("last_active", None)
+    _clear_user_session(request)
     return {"status": "account_deleted"}
 
 # ---------- Chat API (ต้อง login เป็น user ก่อนทุก endpoint) ----------
@@ -698,6 +716,31 @@ def update_user_role_endpoint(user_id: int, body: UpdateUserRoleRequest, _: bool
     if not ok:
         raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้นี้")
     return {"status": "updated"}
+
+@app.post("/admin/api/users/{user_id}/block")
+def block_user_endpoint(user_id: int, _: bool = Depends(require_login)):
+    """ระงับบัญชีชั่วคราว (เช่น สงสัยว่าโดน hack) — บังคับ logout session เดิมทุกที่ทันที
+    ผ่านกลไก session_version (ดู get_active_user_id) ไม่ใช่การเตะออกแบบ real-time"""
+    ok = block_user(user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้นี้ หรือสถานะไม่ใช่ approved อยู่แล้ว")
+    return {"status": "blocked"}
+
+@app.post("/admin/api/users/{user_id}/unblock")
+def unblock_user_endpoint(user_id: int, _: bool = Depends(require_login)):
+    ok = unblock_user(user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้นี้ หรือสถานะไม่ใช่ blocked อยู่")
+    return {"status": "unblocked"}
+
+@app.delete("/admin/api/users/{user_id}")
+def admin_delete_user_endpoint(user_id: int, _: bool = Depends(require_login)):
+    """ลบบัญชีถาวร (เช่น ยืนยันแล้วว่าโดน hack จริง) — ON DELETE CASCADE ลบ
+    chat/security answers ที่เกี่ยวข้องทั้งหมดให้เอง เหมือนตอน user ลบบัญชีตัวเอง"""
+    ok = delete_user(user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้นี้")
+    return {"status": "deleted"}
 
 
 # ---------- เสิร์ฟหน้าเว็บผู้ใช้ ----------
