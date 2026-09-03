@@ -367,11 +367,19 @@ async function loadUsers(page = 1) {
                 `<option value="${r}" ${r === u.role ? "selected" : ""}>${ROLE_LABELS[r]}</option>`
             ).join("");
 
+            const isBlocked = u.status === "blocked";
+            const statusBadge = isBlocked
+                ? `<span class="status-badge status-badge-blocked">🚫 ถูกระงับ</span>`
+                : `<span class="status-badge status-badge-active">✅ ใช้งานได้ปกติ</span>`;
+            const blockButtonHtml = isBlocked
+                ? `<button onclick="unblockUser(${u.id})">🔓 ปลดระงับ</button>`
+                : `<button onclick="blockUser(${u.id})">🔒 ระงับการใช้งาน</button>`;
+
             const div = document.createElement("div");
             div.className = "card";
             div.id = "user-" + u.id;
             div.innerHTML = `
-                <p><strong>ชื่อผู้ใช้:</strong> ${escapeHtml(u.username)}</p>
+                <p><strong>ชื่อผู้ใช้:</strong> ${escapeHtml(u.username)} ${statusBadge}</p>
                 <p><strong>ชื่อเล่น:</strong> ${escapeHtml(u.nickname || "-")}</p>
                 <p style="color:#888; font-size:12px;">สมัครเมื่อ: ${u.created_at ? new Date(u.created_at).toLocaleString("th-TH") : "-"}</p>
                 <div style="margin-top:8px;">
@@ -379,6 +387,10 @@ async function loadUsers(page = 1) {
                         <select id="user-role-${u.id}">${roleOptions}</select>
                     </label>
                     <button onclick="saveUserRole(${u.id})">💾 บันทึก</button>
+                </div>
+                <div style="margin-top:8px;">
+                    ${blockButtonHtml}
+                    <button onclick="deleteUser(${u.id})" class="danger-btn">🗑️ ลบบัญชี</button>
                 </div>
             `;
             container.appendChild(div);
@@ -408,6 +420,43 @@ async function saveUserRole(userId) {
         alert("บันทึกไม่สำเร็จ: " + error);
         btn.textContent = "💾 บันทึก";
         btn.disabled = false;
+    }
+}
+
+async function blockUser(userId) {
+    if (!confirm("ระงับการใช้งานบัญชีนี้? ผู้ใช้จะถูกบังคับ logout จากทุกอุปกรณ์ทันที")) return;
+    try {
+        const res = await fetch(`/admin/api/users/${userId}/block`, { method: "POST" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+    } catch (error) {
+        alert("ระงับการใช้งานไม่สำเร็จ: " + error);
+    } finally {
+        loadUsers(usersPage);
+    }
+}
+
+async function unblockUser(userId) {
+    try {
+        const res = await fetch(`/admin/api/users/${userId}/unblock`, { method: "POST" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+    } catch (error) {
+        alert("ปลดระงับไม่สำเร็จ: " + error);
+    } finally {
+        loadUsers(usersPage);
+    }
+}
+
+async function deleteUser(userId) {
+    if (!confirm("ลบบัญชีนี้ถาวร? ข้อมูลทั้งหมด (ประวัติแชท คำถามกันลืมรหัสผ่าน) จะหายและกู้คืนไม่ได้")) return;
+
+    removeCardOptimistically("user-" + userId);
+    try {
+        const res = await fetch(`/admin/api/users/${userId}`, { method: "DELETE" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+    } catch (error) {
+        alert("ลบไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
+    } finally {
+        loadUsers(usersPage);
     }
 }
 
