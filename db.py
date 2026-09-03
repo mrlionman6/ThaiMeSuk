@@ -16,7 +16,7 @@ db.py — เลเยอร์เชื่อมต่อ PostgreSQL สำห�
         create_user, get_user_by_username, get_user_by_id, update_user_password,
         update_user_nickname, delete_user, save_security_answers, get_security_answers_for_user,
         get_pending_user_requests, approve_user_request, reject_user_request,
-        get_approved_users, update_user_role,
+        get_approved_users, update_user_role, block_user, unblock_user,
         create_chat_session, touch_chat_session, get_user_chats, get_chat_session,
         add_chat_message, get_chat_messages, delete_chat_session,
     )
@@ -74,9 +74,10 @@ class User(Base):
     email = Column(String, nullable=True, unique=True, index=True)  # เก็บไว้เผื่อ backward-compat กับ user เก่า ไม่บังคับใช้แล้ว
     password_hash = Column(String, nullable=False)  # เก็บ bcrypt hash เท่านั้น ไม่เก็บ plain text
     nickname = Column(String, nullable=True)
-    status = Column(String, nullable=False, default="pending")  # pending | approved | rejected — ต้องรอ admin อนุมัติก่อน login ได้
+    status = Column(String, nullable=False, default="pending")  # pending | approved | rejected | blocked
     requested_role = Column(Integer, nullable=True)  # ระดับสิทธิ์ที่ user ขอตอนสมัคร (1/2/3)
     role = Column(Integer, nullable=True)  # ระดับสิทธิ์จริงที่ admin อนุมัติให้ (อาจต่างจาก requested_role)
+    session_version = Column(Integer, nullable=False, default=0)  # เพิ่มขึ้นทุกครั้งที่ block/unblock — บังคับ logout session เก่าทุกที่
     created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
 
 
@@ -153,6 +154,7 @@ def init_db():
         # ไม่งั้นจะ login ไม่ได้ทันทีหลัง deploy รอบนี้ทั้งที่เคยใช้งานได้ปกติมาก่อน
         conn.execute(text("UPDATE users SET status = 'approved' WHERE status IS NULL"))
         conn.execute(text("UPDATE users SET role = 3 WHERE role IS NULL AND status = 'approved'"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0"))
         conn.commit()
 
 
@@ -298,11 +300,12 @@ def get_user_by_username(username: str) -> Optional[dict]:
             "nickname": row.nickname,
             "status": row.status,
             "role": row.role,
+            "session_version": row.session_version,
         }
 
 
 def get_user_by_id(user_id: int) -> Optional[dict]:
-    """ใช้เช็คตอนโหลดหน้า (GET /api/auth/me) — ไม่คืน password_hash ออกไป"""
+    """ใช้เช็คตอนโหลดหน้า (GET /api/auth/me) และเช็คทุก request ที่ต้อง login — ไม่คืน password_hash ออกไป"""
     with SessionLocal() as session:
         row = session.get(User, user_id)
         if row is None:
@@ -313,6 +316,7 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
             "nickname": row.nickname,
             "status": row.status,
             "role": row.role,
+            "session_version": row.session_version,
         }
 
 
@@ -371,9 +375,14 @@ def reject_user_request(user_id: int) -> bool:
 
 
 def get_approved_users(page: int = 1, page_size: int = 10) -> dict:
-    """บัญชีที่อนุมัติแล้วทั้งหมด — ใช้แสดงในแท็บ 'จัดการบัญชี'"""
+    """บัญชีที่ผ่านการอนุมัติแล้วทั้งหมด (รวมที่ถูก block ไว้ด้วย) — ใช้แสดงในแท็บ 'จัดการบัญชี'
+    บัญชี pending/rejected ไม่แสดงในนี้ (อยู่แท็บ 'คำขอสมัครสมาชิก' แทน)"""
     with SessionLocal() as session:
-        q = session.query(User).filter(User.status == "approved").order_by(User.created_at.desc())
+        q = (
+            session.query(User)
+            .filter(User.status.in_(["approved", "blocked"]))
+            .order_by(User.created_at.desc())
+        )
         total = q.count()
         rows = q.offset((page - 1) * page_size).limit(page_size).all()
         items = [
@@ -382,11 +391,38 @@ def get_approved_users(page: int = 1, page_size: int = 10) -> dict:
                 "username": r.username,
                 "nickname": r.nickname,
                 "role": r.role,
+                "status": r.status,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }
             for r in rows
         ]
         return {"items": items, "total": total}
+
+
+def block_user(user_id: int) -> bool:
+    """ระงับการใช้งานชั่วคราว (เช่นระหว่างสงสัยว่าโดน hack) — เพิ่ม session_version บังคับ logout
+    session เดิมทุกที่ทันที คืนค่า False ถ้าไม่เจอหรือสถานะไม่ใช่ approved"""
+    with SessionLocal() as session:
+        row = session.get(User, user_id)
+        if row is None or row.status != "approved":
+            return False
+        row.status = "blocked"
+        row.session_version = (row.session_version or 0) + 1
+        session.commit()
+        return True
+
+
+def unblock_user(user_id: int) -> bool:
+    """ปลด block กลับมาใช้งานได้ปกติ — เพิ่ม session_version ด้วยเช่นกัน (กันกรณีมี session ค้างช่วง block)
+    คืนค่า False ถ้าไม่เจอหรือสถานะไม่ใช่ blocked"""
+    with SessionLocal() as session:
+        row = session.get(User, user_id)
+        if row is None or row.status != "blocked":
+            return False
+        row.status = "approved"
+        row.session_version = (row.session_version or 0) + 1
+        session.commit()
+        return True
 
 
 def update_user_role(user_id: int, role: int) -> bool:
