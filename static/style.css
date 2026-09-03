@@ -502,9 +502,44 @@ button {
     display: block;
 }
 
+.captcha-img-wrapper {
+    position: relative;
+    display: inline-block;
+    line-height: 0; /* กัน gap ใต้ img จาก inline-block default */
+}
+
+.captcha-spinner {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+}
+
+.captcha-spinner::after {
+    content: "";
+    width: 22px;
+    height: 22px;
+    border: 3px solid #ddd;
+    border-top-color: #333;
+    border-radius: 50%;
+    animation: captcha-spin 0.7s linear infinite;
+}
+
+@keyframes captcha-spin {
+    to { transform: rotate(360deg); }
+}
+
 .captcha-refresh-btn {
-    padding: 6px 10px;
-    font-size: 16px;
+    padding: 6px 14px;
+    font-size: 13px;
+}
+
+.captcha-refresh-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 .modal-email-display {
