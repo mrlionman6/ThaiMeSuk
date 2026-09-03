@@ -377,9 +377,12 @@ def register(body: RegisterRequest, request: Request):
         raise HTTPException(status_code=400, detail="ตอบคำถามกันลืมรหัสผ่านให้ครบทุกข้อที่เลือก")
 
     password_hash = hash_password(body.password)
-    new_id = create_user(username, password_hash, nickname, body.requested_role)
-    if new_id is None:
+    result = create_user(username, password_hash, nickname, body.requested_role)
+    if result == "username_taken":
         raise HTTPException(status_code=409, detail="ชื่อผู้ใช้นี้มีคนใช้แล้ว")
+    if result == "nickname_taken":
+        raise HTTPException(status_code=409, detail="ชื่อเล่นนี้มีคนใช้แล้ว กรุณาเลือกชื่อเล่นอื่น")
+    new_id = result
 
     answer_records = [
         {"question_id": a.question_id, "answer_hash": hash_password(normalize_answer(a.answer))}
@@ -490,7 +493,11 @@ def update_nickname(body: UpdateNicknameRequest, user_id: int = Depends(require_
     nickname = body.nickname.strip()
     if not nickname:
         raise HTTPException(status_code=400, detail="ชื่อเล่นห้ามว่างเปล่า")
-    update_user_nickname(user_id, nickname)
+    result = update_user_nickname(user_id, nickname)
+    if result == "nickname_taken":
+        raise HTTPException(status_code=409, detail="ชื่อเล่นนี้มีคนใช้แล้ว กรุณาเลือกชื่อเล่นอื่น")
+    if result == "not_found":
+        raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้นี้")
     return {"status": "nickname_updated", "nickname": nickname}
 
 @app.delete("/api/auth/account")
