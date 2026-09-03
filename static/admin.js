@@ -8,21 +8,36 @@ let pendingPageSize = 10;
 let kbPage = 1;
 let kbPageSize = 10;
 
+let userRequestsPage = 1;
+let userRequestsPageSize = 10;
+
+let usersPage = 1;
+let usersPageSize = 10;
+
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
+const ROLE_LABELS = { 1: "ระดับ 1", 2: "ระดับ 2", 3: "ระดับ 3" };
 
 function switchTab(tab) {
     currentTab = tab;
 
     document.getElementById("tabPending").style.display = tab === "pending" ? "block" : "none";
     document.getElementById("tabKb").style.display = tab === "kb" ? "block" : "none";
+    document.getElementById("tabUserRequests").style.display = tab === "userRequests" ? "block" : "none";
+    document.getElementById("tabUsers").style.display = tab === "users" ? "block" : "none";
 
     document.getElementById("tabBtnPending").classList.toggle("tab-btn-active", tab === "pending");
     document.getElementById("tabBtnKb").classList.toggle("tab-btn-active", tab === "kb");
+    document.getElementById("tabBtnUserRequests").classList.toggle("tab-btn-active", tab === "userRequests");
+    document.getElementById("tabBtnUsers").classList.toggle("tab-btn-active", tab === "users");
 
     if (tab === "pending") {
         loadLogs(pendingPage);
-    } else {
+    } else if (tab === "kb") {
         loadKb(kbPage);
+    } else if (tab === "userRequests") {
+        loadUserRequests(userRequestsPage);
+    } else if (tab === "users") {
+        loadUsers(usersPage);
     }
 }
 
@@ -244,7 +259,159 @@ async function deleteKb(id) {
     }
 }
 
-// ---------- Pagination UI (ใช้ร่วมกันทั้ง 2 แท็บ) ----------
+// ---------- แท็บ 3: คำขอสมัครสมาชิก ----------
+async function loadUserRequests(page = 1) {
+    userRequestsPage = page;
+    const container = document.getElementById("userRequestsContainer");
+    try {
+        const response = await fetch(`/admin/api/user-requests?page=${page}&page_size=${userRequestsPageSize}`);
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const data = await response.json();
+
+        renderPagination("userRequestsPagination", data.total, page, userRequestsPageSize,
+            (newPage) => loadUserRequests(newPage),
+            (newSize) => { userRequestsPageSize = newSize; loadUserRequests(1); });
+
+        if (data.requests.length === 0) {
+            container.innerHTML = page === 1
+                ? "<p>ไม่มีคำขอสมัครสมาชิกรอตรวจสอบ 🎉</p>"
+                : "<p>ไม่มีรายการในหน้านี้</p>";
+            return;
+        }
+
+        container.innerHTML = "";
+        data.requests.forEach(req => {
+            const roleOptions = [1, 2, 3].map(r =>
+                `<option value="${r}" ${r === req.requested_role ? "selected" : ""}>${ROLE_LABELS[r]}</option>`
+            ).join("");
+
+            const div = document.createElement("div");
+            div.className = "card";
+            div.id = "userreq-" + req.id;
+            div.innerHTML = `
+                <p><strong>ชื่อผู้ใช้:</strong> ${escapeHtml(req.username)}</p>
+                <p><strong>ชื่อเล่น:</strong> ${escapeHtml(req.nickname || "-")}</p>
+                <p><strong>ขอสิทธิ์ระดับ:</strong> ${ROLE_LABELS[req.requested_role] || req.requested_role}</p>
+                <p style="color:#888; font-size:12px;">สมัครเมื่อ: ${req.created_at ? new Date(req.created_at).toLocaleString("th-TH") : "-"}</p>
+                <div style="margin-top:8px;">
+                    <label style="font-size:13px;">อนุมัติให้สิทธิ์ระดับ:
+                        <select id="grant-role-${req.id}">${roleOptions}</select>
+                    </label>
+                </div>
+                <div style="margin-top:8px;">
+                    <button onclick="approveUserRequest(${req.id})">✅ อนุมัติ</button>
+                    <button onclick="rejectUserRequest(${req.id})">❌ ปฏิเสธ</button>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    } catch (error) {
+        container.innerHTML = "<p style='color:red;'>โหลดรายการไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
+    }
+}
+
+async function approveUserRequest(userId) {
+    const select = document.getElementById("grant-role-" + userId);
+    const grantedRole = parseInt(select.value, 10);
+
+    removeCardOptimistically("userreq-" + userId);
+    try {
+        const res = await fetch(`/admin/api/user-requests/${userId}/approve`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ granted_role: grantedRole })
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+    } catch (error) {
+        alert("อนุมัติไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
+    } finally {
+        loadUserRequests(userRequestsPage);
+    }
+}
+
+async function rejectUserRequest(userId) {
+    removeCardOptimistically("userreq-" + userId);
+    try {
+        const res = await fetch(`/admin/api/user-requests/${userId}/reject`, { method: "POST" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+    } catch (error) {
+        alert("ปฏิเสธไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
+    } finally {
+        loadUserRequests(userRequestsPage);
+    }
+}
+
+// ---------- แท็บ 4: จัดการบัญชีที่อนุมัติแล้ว ----------
+async function loadUsers(page = 1) {
+    usersPage = page;
+    const container = document.getElementById("usersContainer");
+    try {
+        const response = await fetch(`/admin/api/users?page=${page}&page_size=${usersPageSize}`);
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const data = await response.json();
+
+        renderPagination("usersPagination", data.total, page, usersPageSize,
+            (newPage) => loadUsers(newPage),
+            (newSize) => { usersPageSize = newSize; loadUsers(1); });
+
+        if (data.users.length === 0) {
+            container.innerHTML = page === 1
+                ? "<p>ยังไม่มีบัญชีที่อนุมัติแล้ว</p>"
+                : "<p>ไม่มีรายการในหน้านี้</p>";
+            return;
+        }
+
+        container.innerHTML = `<p style="color:#666; font-size:14px;">ทั้งหมด ${data.total} บัญชี</p>`;
+        data.users.forEach(u => {
+            const roleOptions = [1, 2, 3].map(r =>
+                `<option value="${r}" ${r === u.role ? "selected" : ""}>${ROLE_LABELS[r]}</option>`
+            ).join("");
+
+            const div = document.createElement("div");
+            div.className = "card";
+            div.id = "user-" + u.id;
+            div.innerHTML = `
+                <p><strong>ชื่อผู้ใช้:</strong> ${escapeHtml(u.username)}</p>
+                <p><strong>ชื่อเล่น:</strong> ${escapeHtml(u.nickname || "-")}</p>
+                <p style="color:#888; font-size:12px;">สมัครเมื่อ: ${u.created_at ? new Date(u.created_at).toLocaleString("th-TH") : "-"}</p>
+                <div style="margin-top:8px;">
+                    <label style="font-size:13px;">สิทธิ์ปัจจุบัน:
+                        <select id="user-role-${u.id}">${roleOptions}</select>
+                    </label>
+                    <button onclick="saveUserRole(${u.id})">💾 บันทึก</button>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    } catch (error) {
+        container.innerHTML = "<p style='color:red;'>โหลดรายการไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
+    }
+}
+
+async function saveUserRole(userId) {
+    const select = document.getElementById("user-role-" + userId);
+    const role = parseInt(select.value, 10);
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = "กำลังบันทึก...";
+
+    try {
+        const res = await fetch(`/admin/api/users/${userId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ role })
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        btn.textContent = "✅ บันทึกแล้ว";
+        setTimeout(() => { btn.textContent = "💾 บันทึก"; btn.disabled = false; }, 1200);
+    } catch (error) {
+        alert("บันทึกไม่สำเร็จ: " + error);
+        btn.textContent = "💾 บันทึก";
+        btn.disabled = false;
+    }
+}
+
+// ---------- Pagination UI (ใช้ร่วมกันทุกแท็บ) ----------
 function renderPagination(containerId, total, currentPage, pageSize, onPageChange, onPageSizeChange) {
     const el = document.getElementById(containerId);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
