@@ -394,3 +394,182 @@ button {
     background: #fff;
     border: 1px solid #eee;
 }
+
+/* ---------- Modal overlay (login/register/forgot-password/profile) ---------- */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 50;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 40px 16px;
+}
+
+.modal-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 24px;
+    width: 100%;
+    max-width: 420px;
+    box-sizing: border-box;
+}
+
+.modal-card h2 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    font-size: 20px;
+}
+
+.modal-card input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+    font-size: 14px;
+    padding: 9px;
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.modal-buttons button {
+    flex: 1;
+    font-size: 14px;
+    padding: 8px;
+}
+
+.modal-error {
+    font-size: 13px;
+    color: #c0392b;
+    min-height: 16px;
+    margin-bottom: 4px;
+}
+
+.modal-status {
+    font-size: 13px;
+    margin-left: 8px;
+}
+
+.modal-link {
+    text-align: center;
+    font-size: 13px;
+    margin-top: 10px;
+}
+
+.modal-section-label {
+    font-size: 13px;
+    font-weight: bold;
+    margin: 16px 0 8px;
+}
+
+.modal-email-display {
+    color: #666;
+    font-size: 13px;
+    margin-top: 0;
+}
+
+/* ---------- Register: เลือกคำถามกันลืมรหัสผ่าน ---------- */
+.security-question-row {
+    border: 1px solid #eee;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+}
+
+.security-question-row label {
+    font-size: 13px;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.security-question-row input[type="checkbox"] {
+    width: auto;
+    margin: 2px 0 0;
+    flex-shrink: 0;
+}
+
+.sq-answer-input {
+    margin-top: 6px !important;
+    margin-bottom: 0 !important;
+}
+
+.sq-answer-input:disabled {
+    background: #f4f4f4;
+}
+
+/* ---------- Profile modal ---------- */
+.profile-section {
+    border-top: 1px solid #eee;
+    padding-top: 14px;
+    margin-top: 14px;
+}
+
+.profile-section button {
+    font-size: 13px;
+    padding: 7px 12px;
+}
+
+.profile-danger .modal-danger-note {
+    font-size: 12px;
+    color: #c0392b;
+    margin: 0 0 8px;
+}
+
+.danger-btn {
+    background: #c0392b;
+    color: #fff;
+    border: none;
+}
+
+/* ---------- Sidebar: user area ปุ่มโปรไฟล์/ออกจากระบบ ---------- */
+.side-user-info {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.side-user-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.side-user-buttons button {
+    flex: 1;
+    font-size: 13px;
+    padding: 6px;
+}
+
+/* ---------- Sidebar: รายการแชท พร้อมปุ่มลบ ---------- */
+.side-chat-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px;
+}
+
+.side-chat-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.side-chat-delete {
+    background: none;
+    border: none;
+    color: #999;
+    font-size: 12px;
+    padding: 2px 6px;
+    flex-shrink: 0;
+}
+
+.side-chat-delete:hover {
+    color: #c0392b;
+}
