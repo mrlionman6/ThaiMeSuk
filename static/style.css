@@ -602,6 +602,24 @@ button {
     border: none;
 }
 
+/* ---------- Admin: status badge ในแท็บจัดการบัญชี ---------- */
+.status-badge {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-left: 6px;
+}
+
+.status-badge-active {
+    background: #e6f4ea;
+    color: #1e7e34;
+}
+
+.status-badge-blocked {
+    background: #fdecea;
+    color: #c0392b;
+}
+
 /* ---------- Sidebar: user area ปุ่มโปรไฟล์/ออกจากระบบ ---------- */
 .side-user-info {
     display: flex;
