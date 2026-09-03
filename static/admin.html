@@ -17,6 +17,12 @@
         <button id="tabBtnKb" class="tab-btn" onclick="switchTab('kb')">
             📚 Knowledge Base
         </button>
+        <button id="tabBtnUserRequests" class="tab-btn" onclick="switchTab('userRequests')">
+            🙋 คำขอสมัครสมาชิก
+        </button>
+        <button id="tabBtnUsers" class="tab-btn" onclick="switchTab('users')">
+            👥 จัดการบัญชี
+        </button>
     </div>
 
     <div id="tabPending" class="tab-panel">
@@ -46,6 +52,16 @@
         </div>
         <div id="kbContainer">กำลังโหลด...</div>
         <div id="kbPagination" class="pagination-bar"></div>
+    </div>
+
+    <div id="tabUserRequests" class="tab-panel" style="display:none;">
+        <div id="userRequestsContainer">กำลังโหลด...</div>
+        <div id="userRequestsPagination" class="pagination-bar"></div>
+    </div>
+
+    <div id="tabUsers" class="tab-panel" style="display:none;">
+        <div id="usersContainer">กำลังโหลด...</div>
+        <div id="usersPagination" class="pagination-bar"></div>
     </div>
 
     <script src="/static/admin.js"></script>
