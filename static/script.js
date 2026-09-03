@@ -227,8 +227,11 @@ async function openRegisterModal() {
 
             <p class="modal-section-label">ยืนยันว่าไม่ใช่บอท</p>
             <div class="captcha-row">
-                <img id="captchaImg" src="/api/auth/captcha" alt="รหัสยืนยันภาพ">
-                <button type="button" onclick="refreshCaptcha()" class="captcha-refresh-btn" title="เปลี่ยนภาพใหม่">🔄</button>
+                <div class="captcha-img-wrapper">
+                    <img id="captchaImg" src="/api/auth/captcha" alt="รหัสยืนยันภาพ">
+                    <div id="captchaSpinner" class="captcha-spinner" hidden></div>
+                </div>
+                <button type="button" id="captchaRefreshBtn" onclick="refreshCaptcha()" class="captcha-refresh-btn">สุ่มใหม่</button>
             </div>
             <input type="text" id="regCaptchaAnswer" placeholder="พิมพ์ตัวอักษร/ตัวเลขที่เห็นในภาพ" required>
 
@@ -294,7 +297,27 @@ async function openRegisterModal() {
 }
 
 function refreshCaptcha() {
-    document.getElementById("captchaImg").src = "/api/auth/captcha?t=" + Date.now(); // กัน browser cache ภาพเดิม
+    const img = document.getElementById("captchaImg");
+    const spinner = document.getElementById("captchaSpinner");
+    const btn = document.getElementById("captchaRefreshBtn");
+
+    btn.disabled = true; // กันกดซ้ำระหว่างกำลังโหลดภาพใหม่
+    spinner.hidden = false;
+
+    // preload ภาพใหม่แบบ offscreen ก่อน ค่อยสลับ src จริงตอนโหลดเสร็จ
+    // กันเห็นภาพโหลดครึ่งๆ กลางๆ หรือภาพแตกระหว่างรอ
+    const preload = new Image();
+    preload.onload = () => {
+        img.src = preload.src;
+        spinner.hidden = true;
+        btn.disabled = false;
+    };
+    preload.onerror = () => {
+        spinner.hidden = true;
+        btn.disabled = false;
+        alert("โหลดภาพยืนยันไม่สำเร็จ ลองใหม่อีกครั้ง");
+    };
+    preload.src = "/api/auth/captcha?t=" + Date.now(); // กัน browser cache ภาพเดิม
 }
 
 function toggleSecurityAnswerInput(questionId) {
