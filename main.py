@@ -14,13 +14,18 @@ from db import (
     approve_log as db_approve_log,   # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
     reject_log as db_reject_log,     # alias กัน shadow ชื่อกับ endpoint ด้านล่าง
     create_user,
-    get_user_by_email,
+    get_user_by_username,
     get_user_by_id,
     update_user_password,
     update_user_nickname,
     delete_user,
     save_security_answers,
     get_security_answers_for_user,
+    get_pending_user_requests,
+    approve_user_request,
+    reject_user_request,
+    get_approved_users,
+    update_user_role,
     create_chat_session,
     touch_chat_session,
     get_user_chats,
@@ -31,14 +36,16 @@ from db import (
 )
 
 import os
+import io
 import json
 import time
+import string
 import random
 import bcrypt
 from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Request, Form, UploadFile, File
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 import anthropic
 from sentence_transformers import SentenceTransformer, CrossEncoder
@@ -46,6 +53,7 @@ from rank_bm25 import BM25Okapi
 from pythainlp.tokenize import word_tokenize
 import numpy as np
 from starlette.middleware.sessions import SessionMiddleware
+from PIL import Image, ImageDraw, ImageFont
 
 app = FastAPI()
 app.add_middleware(
@@ -69,6 +77,9 @@ SECURITY_QUESTIONS = {
 }
 REQUIRED_SECURITY_ANSWERS = 5  # ต้องเลือกตอบให้ครบเท่านี้ตอนสมัคร
 SESSION_TIMEOUT_SECONDS = 8 * 60 * 60  # auto-logout ถ้าไม่ใช้งานเกิน 8 ชั่วโมง
+VALID_ROLES = (1, 2, 3)  # ระดับสิทธิ์ผู้ใช้ — ความหมายจริงจะถูกกำหนดทีหลังตอนจำกัด prompt ตามสิทธิ์
+CAPTCHA_CHARS = string.ascii_uppercase + string.digits  # ตัดตัวที่สับสนง่ายออก (O/0, I/1) เพื่อความชัดเจน
+CAPTCHA_CHARS = "".join(c for c in CAPTCHA_CHARS if c not in "O0I1")
 
 # ---------- โหลดโมเดล ----------
 print("กำลังโหลดโมเดล...")
@@ -233,23 +244,25 @@ class SecurityAnswerInput(BaseModel):
     answer: str
 
 class RegisterRequest(BaseModel):
-    email: str
+    username: str
     password: str
     nickname: str
+    requested_role: int
+    captcha_answer: str
     security_answers: list[SecurityAnswerInput]
 
 class LoginRequest(BaseModel):
-    email: str
+    username: str
     password: str
 
 class ChatCreateRequest(BaseModel):
     title: Optional[str] = None
 
 class ForgotPasswordQuestionsRequest(BaseModel):
-    email: str
+    username: str
 
 class ForgotPasswordResetRequest(BaseModel):
-    email: str
+    username: str
     answers: list[SecurityAnswerInput]
     new_password: str
 
@@ -262,6 +275,12 @@ class DeleteAccountRequest(BaseModel):
 
 class UpdateNicknameRequest(BaseModel):
     nickname: str
+
+class ApproveUserRequest(BaseModel):
+    granted_role: int
+
+class UpdateUserRoleRequest(BaseModel):
+    role: int
 
 # ---------- User API ----------
 @app.post("/ask")
@@ -293,17 +312,55 @@ def list_security_questions():
     """คืนรายการคำถามทั้ง 10 ข้อ (ไม่มีคำตอบ) — ใช้ตอน render ฟอร์มสมัคร"""
     return {"questions": [{"id": qid, "text": text} for qid, text in SECURITY_QUESTIONS.items()]}
 
+@app.get("/api/auth/captcha")
+def get_captcha(request: Request):
+    """สร้างภาพ CAPTCHA แบบง่าย (วาดเองด้วย Pillow ไม่พึ่ง third-party service)
+    เก็บคำตอบไว้ใน session ชั่วคราว — ใช้ครั้งเดียวแล้วลบทิ้งตอน verify"""
+    captcha_text = "".join(random.choices(CAPTCHA_CHARS, k=5))
+    request.session["captcha_text"] = captcha_text
+
+    img = Image.new("RGB", (150, 50), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    font = ImageFont.load_default()
+
+    for i, ch in enumerate(captcha_text):
+        x = 12 + i * 26 + random.randint(-3, 3)
+        y = 15 + random.randint(-5, 5)
+        draw.text((x, y), ch, fill=(20, 20, 20), font=font)
+
+    # เส้นรบกวนพื้นหลัง กัน bot อ่านง่ายเกินไป
+    for _ in range(6):
+        x1, y1 = random.randint(0, 150), random.randint(0, 50)
+        x2, y2 = random.randint(0, 150), random.randint(0, 50)
+        draw.line([(x1, y1), (x2, y2)], fill=(190, 190, 190), width=1)
+
+    img = img.resize((300, 100))  # ขยาย 2 เท่า ให้ตัวอักษรจากฟอนต์ bitmap เล็กๆ อ่านง่ายขึ้น
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
+
 @app.post("/api/auth/register")
 def register(body: RegisterRequest, request: Request):
-    email = body.email.strip().lower()
-    if not email or "@" not in email:
-        raise HTTPException(status_code=400, detail="อีเมลไม่ถูกต้อง")
+    username = body.username.strip()
+    if len(username) < 3:
+        raise HTTPException(status_code=400, detail="ชื่อผู้ใช้ต้องมีอย่างน้อย 3 ตัวอักษร")
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร")
 
     nickname = body.nickname.strip()
     if not nickname:
         raise HTTPException(status_code=400, detail="กรุณาตั้งชื่อเล่น (nickname)")
+
+    if body.requested_role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail="ระดับสิทธิ์ที่ขอไม่ถูกต้อง")
+
+    # เช็ค CAPTCHA ก่อนอย่างอื่น — ใช้ครั้งเดียวแล้วลบทิ้งทันที กันเดาซ้ำ/replay
+    stored_captcha = request.session.get("captcha_text")
+    request.session.pop("captcha_text", None)
+    if not stored_captcha or body.captcha_answer.strip().upper() != stored_captcha:
+        raise HTTPException(status_code=400, detail="กรอกรหัสยืนยันภาพ (CAPTCHA) ไม่ถูกต้อง")
 
     if len(body.security_answers) != REQUIRED_SECURITY_ANSWERS:
         raise HTTPException(
@@ -320,9 +377,9 @@ def register(body: RegisterRequest, request: Request):
         raise HTTPException(status_code=400, detail="ตอบคำถามกันลืมรหัสผ่านให้ครบทุกข้อที่เลือก")
 
     password_hash = hash_password(body.password)
-    new_id = create_user(email, password_hash, nickname)
+    new_id = create_user(username, password_hash, nickname, body.requested_role)
     if new_id is None:
-        raise HTTPException(status_code=409, detail="อีเมลนี้มีผู้ใช้งานแล้ว")
+        raise HTTPException(status_code=409, detail="ชื่อผู้ใช้นี้มีคนใช้แล้ว")
 
     answer_records = [
         {"question_id": a.question_id, "answer_hash": hash_password(normalize_answer(a.answer))}
@@ -330,20 +387,27 @@ def register(body: RegisterRequest, request: Request):
     ]
     save_security_answers(new_id, answer_records)
 
-    request.session["user_id"] = new_id
-    request.session["last_active"] = time.time()
-    return {"status": "registered", "user": {"id": new_id, "email": email, "nickname": nickname}}
+    # ไม่ auto-login แล้ว — ต้องรอ admin อนุมัติก่อนถึง login ได้
+    return {"status": "pending_approval"}
 
 @app.post("/api/auth/login")
 def user_login(body: LoginRequest, request: Request):
-    email = body.email.strip().lower()
-    user = get_user_by_email(email)
+    username = body.username.strip()
+    user = get_user_by_username(username)
     if user is None or not verify_password(body.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="อีเมลหรือรหัสผ่านไม่ถูกต้อง")
+        raise HTTPException(status_code=401, detail="ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง")
+
+    if user["status"] == "pending":
+        raise HTTPException(status_code=403, detail="บัญชีนี้ยังรอการอนุมัติจากผู้ดูแลระบบ")
+    if user["status"] == "rejected":
+        raise HTTPException(status_code=403, detail="คำขอสมัครสมาชิกนี้ถูกปฏิเสธ")
 
     request.session["user_id"] = user["id"]
     request.session["last_active"] = time.time()
-    return {"status": "logged_in", "user": {"id": user["id"], "email": user["email"], "nickname": user["nickname"]}}
+    return {
+        "status": "logged_in",
+        "user": {"id": user["id"], "username": user["username"], "nickname": user["nickname"], "role": user["role"]},
+    }
 
 @app.post("/api/auth/logout")
 def user_logout(request: Request):
@@ -366,10 +430,10 @@ def auth_me(request: Request):
 @app.post("/api/auth/forgot-password/questions")
 def forgot_password_questions(body: ForgotPasswordQuestionsRequest):
     """สุ่ม 2 ข้อจาก 5 ข้อที่ user เคยตั้งไว้ตอนสมัคร มาให้ตอบยืนยันตัวตน"""
-    email = body.email.strip().lower()
-    user = get_user_by_email(email)
+    username = body.username.strip()
+    user = get_user_by_username(username)
     if user is None:
-        # ไม่บอกตรงๆ ว่าไม่เจออีเมล กันคนสุ่มเช็คว่าอีเมลไหนมีในระบบ (user enumeration)
+        # ไม่บอกตรงๆ ว่าไม่เจอ username กันคนสุ่มเช็คว่า username ไหนมีในระบบ (user enumeration)
         raise HTTPException(status_code=404, detail="ไม่พบบัญชีนี้ หรือข้อมูลไม่ถูกต้อง")
 
     answers = get_security_answers_for_user(user["id"])
@@ -390,8 +454,8 @@ def forgot_password_reset(body: ForgotPasswordResetRequest):
     if len(body.answers) != 2:
         raise HTTPException(status_code=400, detail="ต้องตอบคำถามให้ครบ 2 ข้อ")
 
-    email = body.email.strip().lower()
-    user = get_user_by_email(email)
+    username = body.username.strip()
+    user = get_user_by_username(username)
     if user is None:
         raise HTTPException(status_code=404, detail="ไม่พบบัญชีนี้ หรือข้อมูลไม่ถูกต้อง")
 
@@ -413,7 +477,7 @@ def change_password(body: ChangePasswordRequest, user_id: int = Depends(require_
         raise HTTPException(status_code=400, detail="รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร")
 
     user = get_user_by_id(user_id)
-    full_user = get_user_by_email(user["email"])  # ต้องดึงผ่าน email เพราะ get_user_by_id ไม่คืน password_hash
+    full_user = get_user_by_username(user["username"])  # ต้องดึงผ่าน username เพราะ get_user_by_id ไม่คืน password_hash
     if not verify_password(body.current_password, full_user["password_hash"]):
         raise HTTPException(status_code=401, detail="รหัสผ่านปัจจุบันไม่ถูกต้อง")
 
@@ -432,7 +496,7 @@ def update_nickname(body: UpdateNicknameRequest, user_id: int = Depends(require_
 @app.delete("/api/auth/account")
 def delete_account(body: DeleteAccountRequest, request: Request, user_id: int = Depends(require_user)):
     user = get_user_by_id(user_id)
-    full_user = get_user_by_email(user["email"])
+    full_user = get_user_by_username(user["username"])
     if not verify_password(body.password, full_user["password_hash"]):
         raise HTTPException(status_code=401, detail="รหัสผ่านไม่ถูกต้อง")
 
@@ -590,6 +654,43 @@ def delete_kb(chunk_id: int, _: bool = Depends(require_login)):
         raise HTTPException(status_code=404, detail="Chunk not found")
     rebuild_index()
     return {"status": "deleted"}
+
+# ---------- Admin API (คำขอสมัครสมาชิก — แท็บใหม่) ----------
+@app.get("/admin/api/user-requests")
+def list_user_requests(page: int = 1, page_size: int = 10, _: bool = Depends(require_login)):
+    result = get_pending_user_requests(page=page, page_size=page_size)
+    return {"requests": result["items"], "total": result["total"], "page": page, "page_size": page_size}
+
+@app.post("/admin/api/user-requests/{user_id}/approve")
+def approve_user_request_endpoint(user_id: int, body: ApproveUserRequest, _: bool = Depends(require_login)):
+    if body.granted_role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail="ระดับสิทธิ์ไม่ถูกต้อง")
+    ok = approve_user_request(user_id, body.granted_role)
+    if not ok:
+        raise HTTPException(status_code=404, detail="ไม่พบคำขอนี้ หรือถูกตัดสินใจไปแล้ว")
+    return {"status": "approved"}
+
+@app.post("/admin/api/user-requests/{user_id}/reject")
+def reject_user_request_endpoint(user_id: int, _: bool = Depends(require_login)):
+    ok = reject_user_request(user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="ไม่พบคำขอนี้ หรือถูกตัดสินใจไปแล้ว")
+    return {"status": "rejected"}
+
+# ---------- Admin API (จัดการบัญชีผู้ใช้ที่อนุมัติแล้ว — แท็บใหม่) ----------
+@app.get("/admin/api/users")
+def list_users(page: int = 1, page_size: int = 10, _: bool = Depends(require_login)):
+    result = get_approved_users(page=page, page_size=page_size)
+    return {"users": result["items"], "total": result["total"], "page": page, "page_size": page_size}
+
+@app.put("/admin/api/users/{user_id}")
+def update_user_role_endpoint(user_id: int, body: UpdateUserRoleRequest, _: bool = Depends(require_login)):
+    if body.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail="ระดับสิทธิ์ไม่ถูกต้อง")
+    ok = update_user_role(user_id, body.role)
+    if not ok:
+        raise HTTPException(status_code=404, detail="ไม่พบผู้ใช้นี้")
+    return {"status": "updated"}
 
 
 # ---------- เสิร์ฟหน้าเว็บผู้ใช้ ----------
