@@ -83,6 +83,10 @@ VALID_ROLES = (1, 2, 3)  # ระดับสิทธิ์ผู้ใช้ �
 CAPTCHA_CHARS = string.ascii_uppercase + string.digits  # ตัดตัวที่สับสนง่ายออก (O/0, I/1) เพื่อความชัดเจน
 CAPTCHA_CHARS = "".join(c for c in CAPTCHA_CHARS if c not in "O0I1")
 
+# ---------- Conversational RAG: จำกัดขนาดประวัติที่ส่งกลับทุกครั้ง กัน token บวมเมื่อแชทยาวขึ้น ----------
+MAX_HISTORY_MESSAGES = 10  # 5 คู่ (user+assistant) ล่าสุด ที่ส่งให้ Claude ตัวจริงดูประกอบตอบ
+REWRITER_HISTORY_MESSAGES = 6  # 3 คู่ล่าสุด ที่ส่งให้ Query Rewriter ดูประกอบ (ไม่ต้องเยอะเท่า main context)
+
 # ---------- โหลดโมเดล ----------
 print("กำลังโหลดโมเดล...")
 embed_model = SentenceTransformer('intfloat/multilingual-e5-large')
@@ -214,25 +218,76 @@ DISCLAIMER = (
     "กรุณาปรึกษาทนายความหรือหน่วยงานราชการที่เกี่ยวข้องสำหรับกรณีเฉพาะของท่าน"
 )
 
-def rag_answer(query):
-    candidates = hybrid_search(query, k=5)
-    top_chunks, scores = rerank_with_scores(query, candidates, top_k=3)
+def rewrite_query_for_retrieval(query: str, history: list) -> str:
+    """ใช้ Claude Haiku เขียนคำถามที่กำกวม/อ้างอิงบริบทก่อนหน้า (เช่น 'แล้วอันนี้ล่ะ')
+    ให้เป็นประโยคสมบูรณ์ในตัวเอง ก่อนนำไปค้นหาใน Knowledge Base — แก้ปัญหา RAG ทั่วไปที่มักพลาด
+    เวลาคำถามถูกตัดตอนมาจากบทสนทนา (ไม่มีบริบทพอให้ embedding/BM25 ค้นแม่น)
+
+    สำคัญ: ถ้าคำถามใหม่เป็นคนละเรื่องกับที่คุยไว้ก่อนหน้า (user เปลี่ยนหัวข้อ) ต้องคืนคำถามเดิม
+    กลับไปตรงๆ ไม่งั้นจะกลายเป็นบั๊กตรงข้าม (ยึดติดบริบทเก่าจนตอบเพี้ยนเรื่องใหม่)"""
+    if not history:
+        return query  # เทิร์นแรกของแชทไม่มีบริบทให้อ้างอิง ไม่ต้องเสีย API call รีไรท์
+
+    recent = history[-REWRITER_HISTORY_MESSAGES:]
+    history_text = "\n".join(
+        f"{'ผู้ใช้' if m['role'] == 'user' else 'ผู้ช่วย'}: {m['content']}" for m in recent
+    )
+
+    rewrite_prompt = (
+        "ต่อไปนี้คือบทสนทนาก่อนหน้า และคำถามใหม่ล่าสุดของผู้ใช้\n\n"
+        f"บทสนทนาก่อนหน้า:\n{history_text}\n\n"
+        f"คำถามใหม่ล่าสุด: {query}\n\n"
+        "หน้าที่ของคุณ:\n"
+        "- ถ้าคำถามใหม่นี้อ้างอิงถึงสิ่งที่คุยไว้ก่อนหน้า (เช่นใช้คำว่า \"แล้ว...ล่ะ\", \"อันนี้\", \"ถ้าเป็น...ล่ะ\") "
+        "ให้เขียนคำถามใหม่เป็นประโยคที่สมบูรณ์ในตัวเอง ไม่ต้องพึ่งบริบทก่อนหน้าอีกต่อไป\n"
+        "- แต่ถ้าคำถามใหม่เป็นคนละเรื่องกับที่คุยไว้เลย (เปลี่ยนหัวข้อ) ให้คืนคำถามเดิมกลับไปตรงๆ ไม่ต้องแก้ไขอะไร\n"
+        "- ตอบกลับมาแค่คำถามที่ได้เท่านั้น ห้ามมีคำอธิบายหรือข้อความอื่นเพิ่มเติม"
+    )
+
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=150,
+        messages=[{"role": "user", "content": rewrite_prompt}],
+    )
+    rewritten = response.content[0].text.strip()
+    print(f"[QueryRewriter] original={query!r} -> rewritten={rewritten!r}")  # เช็คผลผ่าน Railway logs ได้
+    return rewritten if rewritten else query
+
+def rag_answer(query, history=None):
+    history = history or []
+
+    search_query = rewrite_query_for_retrieval(query, history)
+    candidates = hybrid_search(search_query, k=5)
+    top_chunks, scores = rerank_with_scores(search_query, candidates, top_k=3)
     context = "\n".join([f"- {c}" for c in top_chunks])
 
-    prompt = "คุณเป็นผู้ช่วยให้ความรู้กฎหมายเบื้องต้นแก่ประชาชนไทย\n\n"
-    prompt += "ข้อมูลอ้างอิงที่อาจเกี่ยวข้อง (ใช้ประกอบถ้าตรงกับคำถาม):\n" + context + "\n\n"
-    prompt += "คำถาม: " + query + "\n\n"
-    prompt += "คำแนะนำในการตอบ:\n"
-    prompt += "- ถ้าข้อมูลอ้างอิงข้างต้นตรงกับคำถาม ให้ใช้ข้อมูลนั้นเป็นหลัก\n"
-    prompt += "- ถ้าข้อมูลอ้างอิงไม่ครอบคลุมหรือไม่มีรายละเอียดพอ ให้ใช้ความรู้ทั่วไปของคุณตอบเสริมให้ครบถ้วนที่สุด โดยไม่ต้องบอกผู้ใช้ว่าข้อมูลอ้างอิงไม่พอ\n"
-    prompt += "- ตอบให้มั่นใจ ชัดเจน เป็นประโยชน์ที่สุดสำหรับผู้ถาม\n"
-    prompt += "- ห้ามใส่ข้อความ disclaimer หรือคำเตือนใดๆ ท้ายคำตอบเอง ระบบจะเป็นผู้เพิ่มให้เองภายหลัง\n\n"
-    prompt += "ตอบเป็นภาษาไทย กระชับ เข้าใจง่ายสำหรับประชาชนทั่วไป"
+    system_prompt = (
+        "คุณเป็นผู้ช่วยให้ความรู้กฎหมายเบื้องต้นแก่ประชาชนไทย\n"
+        "- ถ้าข้อมูลอ้างอิงที่ให้มาตรงกับคำถาม ให้ใช้ข้อมูลนั้นเป็นหลัก\n"
+        "- ถ้าข้อมูลอ้างอิงไม่ครอบคลุมหรือไม่มีรายละเอียดพอ ให้ใช้ความรู้ทั่วไปของคุณตอบเสริมให้ครบถ้วนที่สุด "
+        "โดยไม่ต้องบอกผู้ใช้ว่าข้อมูลอ้างอิงไม่พอ\n"
+        "- ตอบให้มั่นใจ ชัดเจน เป็นประโยชน์ที่สุดสำหรับผู้ถาม\n"
+        "- ห้ามใส่ข้อความ disclaimer หรือคำเตือนใดๆ ท้ายคำตอบเอง ระบบจะเป็นผู้เพิ่มให้เองภายหลัง\n"
+        "- ตอบเป็นภาษาไทย กระชับ เข้าใจง่ายสำหรับประชาชนทั่วไป\n"
+        "- ถ้าคำถามล่าสุดอ้างอิงถึงสิ่งที่คุยไว้ก่อนหน้าในบทสนทนานี้ ให้ใช้บริบทนั้นประกอบการตอบด้วย"
+    )
+
+    current_turn_content = (
+        "ข้อมูลอ้างอิงที่อาจเกี่ยวข้อง (ใช้ประกอบถ้าตรงกับคำถาม):\n" + context + "\n\n"
+        "คำถาม: " + query
+    )
+
+    # ต่อประวัติสนทนาเดิม (ถ้ามี) เข้าเป็น multi-turn messages ก่อนคำถามล่าสุด
+    # ใช้แค่ query ต้นฉบับ (ไม่ใช่ search_query ที่ rewrite แล้ว) เพราะนี่คือสิ่งที่ user พิมพ์จริง
+    recent_history = history[-MAX_HISTORY_MESSAGES:] if history else []
+    messages = [{"role": m["role"], "content": m["content"]} for m in recent_history]
+    messages.append({"role": "user", "content": current_turn_content})
 
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}]
+        system=system_prompt,
+        messages=messages,
     )
     answer = response.content[0].text.strip() + DISCLAIMER  # บังคับเพิ่มด้วยโค้ด ไม่พึ่ง LLM ทำตาม prompt เพียงอย่างเดียว
 
@@ -302,20 +357,25 @@ class UpdateUserRoleRequest(BaseModel):
 # ---------- User API ----------
 @app.post("/ask")
 def ask_question(question: Question, request: Request):
-    answer, sources = rag_answer(question.query)
-
     user_id = get_active_user_id(request)
     chat_id = question.chat_id
+
+    # ดึงประวัติสนทนา "ก่อน" เรียก rag_answer เพราะต้องใช้ตอน rewrite query + ส่งเป็น multi-turn context
+    # จำกัดเฉพาะ user ที่ login เท่านั้น (guest ไม่มี chat_id/ประวัติผูกกับ DB ให้ดึง)
+    history = []
+    if user_id and chat_id:
+        # เช็คว่าแชทนี้เป็นของ user คนนี้จริง กัน user คนอื่นยัดคำถามใส่แชทของคนอื่น
+        if get_chat_session(chat_id, user_id) is None:
+            raise HTTPException(status_code=404, detail="ไม่พบแชทนี้")
+        history = get_chat_messages(chat_id)
+
+    answer, sources = rag_answer(question.query, history=history)
 
     if user_id:
         if chat_id is None:
             # ยังไม่มีแชทอยู่ (ผู้ใช้เพิ่งเริ่มถามคำถามแรก) — สร้างแชทใหม่ ตั้งชื่อจากคำถามแรก
             title = question.query.strip()[:50] or "แชทใหม่"
             chat_id = create_chat_session(user_id, title=title)
-        else:
-            # เช็คว่าแชทนี้เป็นของ user คนนี้จริง กัน user คนอื่นยัดข้อความใส่แชทของคนอื่น
-            if get_chat_session(chat_id, user_id) is None:
-                raise HTTPException(status_code=404, detail="ไม่พบแชทนี้")
 
         add_chat_message(chat_id, "user", question.query)
         add_chat_message(chat_id, "assistant", answer)
