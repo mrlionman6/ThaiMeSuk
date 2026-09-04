@@ -6,9 +6,13 @@
 
 body {
     font-family: sans-serif;
-    max-width: 600px;
+    /* ขยายตามความกว้างหน้าต่างจริง (width: 92%) แต่ยัง cap ไว้ที่ 900px บนจอกว้างมากๆ
+       เพื่อไม่ให้บรรทัดข้อความยาวเกินไปจนอ่านยาก (แนวทางเดียวกับแชทแอปทั่วไปอย่าง ChatGPT) */
+    max-width: 900px;
+    width: 92%;
     margin: 40px auto;
     padding: 0 20px;
+    box-sizing: border-box;
 }
 
 input {
