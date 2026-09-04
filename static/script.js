@@ -61,6 +61,16 @@ function appendChatMessage(role, content) {
         wrapper.innerHTML = DOMPurify.sanitize(rawHtml);
     }
     box.appendChild(wrapper);
+    updateTitleVisibility(); // แชทมีข้อความแล้ว → ซ่อนข้อความทักทายทันที
+}
+
+// ข้อความทักทาย "กำลังสงสัยกฎหมายอะไรอยู่?" โชว์เฉพาะตอนแชทว่างเปล่า (ยังไม่มีคำถามเลย)
+// หายไปทันทีที่เริ่มมีข้อความในแชท และกลับมาโชว์อีกครั้งตอนกด "แชทใหม่"
+function updateTitleVisibility() {
+    const title = document.querySelector(".page-title");
+    const box = document.getElementById("answerBox");
+    if (!title || !box) return;
+    title.style.display = box.children.length === 0 ? "" : "none";
 }
 
 function scrollChatToBottom() {
@@ -688,6 +698,7 @@ function renderChatTranscript(messages) {
     const box = document.getElementById("answerBox");
     box.innerHTML = "";
     messages.forEach(msg => appendChatMessage(msg.role, msg.content));
+    updateTitleVisibility(); // เผื่อกรณี messages ว่างเปล่า (edge case) ให้ title โชว์ถูกต้อง
     scrollChatToBottom();
 }
 
@@ -695,6 +706,7 @@ function startNewChat() {
     currentChatId = null;
     document.getElementById("answerBox").innerHTML = "";
     document.getElementById("questionInput").value = "";
+    updateTitleVisibility(); // แชทว่างแล้ว → โชว์ข้อความทักทายกลับมา
     loadChatHistory();
     closeSidebar();
 }
