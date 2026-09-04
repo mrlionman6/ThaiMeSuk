@@ -29,6 +29,15 @@ button {
     /* ลบ white-space: pre-wrap ออก — ตัวการที่ทำให้ระยะห่างเกินจริง
        เพราะไปแสดงช่องว่าง/บรรทัดใหม่ในซอร์ส HTML ที่ marked.js สร้างขึ้น
        ซ้อนทับกับ margin ของแต่ละ tag (h1, p, ol ฯลฯ) อีกชั้น */
+
+    /* กล่องแชท scroll ได้ — เก็บทุกคำถาม-คำตอบในแชทเดียวกันไว้ให้เลื่อนดูย้อนได้
+       แทนที่จะแทนที่เนื้อหาทุกครั้งที่ถามใหม่เหมือนเดิม */
+    max-height: 480px;
+    overflow-y: auto;
+    border: 1px solid #eee;
+    border-radius: 8px;
+    padding: 14px;
+    box-sizing: border-box;
 }
 
 #answerBox h1, #answerBox h2, #answerBox h3 {
