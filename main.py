@@ -39,6 +39,7 @@ from db import (
 
 import os
 import io
+import re
 import json
 import time
 import string
@@ -253,6 +254,22 @@ def rewrite_query_for_retrieval(query: str, history: list) -> str:
     print(f"[QueryRewriter] original={query!r} -> rewritten={rewritten!r}")  # เช็คผลผ่าน Railway logs ได้
     return rewritten if rewritten else query
 
+UNEXPECTED_SCRIPT_PATTERN = re.compile(
+    # ช่วง Unicode ของอักษรจีน/ญี่ปุ่น/เกาหลี ที่ไม่ควรโผล่ในคำตอบภาษาไทย
+    # ไม่แตะอังกฤษ/ตัวเลข เพราะคำตอบไทยมีคำอังกฤษปนได้ปกติ (เช่น "VAT", "โอที")
+    r"[\u4e00-\u9fff"   # CJK Unified Ideographs (จีน/คันจิ)
+    r"\u3040-\u309f"    # Hiragana
+    r"\u30a0-\u30ff"    # Katakana
+    r"\uac00-\ud7a3]"   # Hangul syllables (เกาหลี)
+)
+
+def contains_unexpected_script(text: str) -> bool:
+    """เช็คว่ามีตัวอักษรจีน/ญี่ปุ่น/เกาหลีหลุดปนมาไหม (language mixing hallucination)
+    ปัญหานี้เกิดแบบสุ่มเป็นครั้งคราวกับ LLM ทุกตัว — แก้ด้วยการ retry แทนเปลี่ยนโมเดล"""
+    return bool(UNEXPECTED_SCRIPT_PATTERN.search(text))
+
+MAX_ANSWER_RETRIES = 2  # ลองใหม่ได้สูงสุดกี่ครั้งถ้าเจอภาษาแปลกปลอม ก่อนยอมส่งคำตอบล่าสุดกลับไป
+
 def rag_answer(query, history=None):
     history = history or []
 
@@ -283,13 +300,23 @@ def rag_answer(query, history=None):
     messages = [{"role": m["role"], "content": m["content"]} for m in recent_history]
     messages.append({"role": "user", "content": current_turn_content})
 
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1500,
-        system=system_prompt,
-        messages=messages,
-    )
-    answer = response.content[0].text.strip() + DISCLAIMER  # บังคับเพิ่มด้วยโค้ด ไม่พึ่ง LLM ทำตาม prompt เพียงอย่างเดียว
+    raw_answer = ""
+    for attempt in range(1, MAX_ANSWER_RETRIES + 2):  # ลองครั้งแรก + retry อีก MAX_ANSWER_RETRIES ครั้ง
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            system=system_prompt,
+            messages=messages,
+        )
+        raw_answer = response.content[0].text.strip()
+
+        if not contains_unexpected_script(raw_answer):
+            break  # ปกติดี ไม่ต้องลองใหม่
+        print(f"[LanguageGuard] เจอภาษาแปลกปลอมในคำตอบ (ครั้งที่ {attempt}) — กำลังลองใหม่")
+    else:
+        print("[LanguageGuard] ลองใหม่ครบจำนวนแล้วแต่ยังเจอปัญหา — ส่งคำตอบล่าสุดกลับไปทั้งที่ยังมีปัญหา")
+
+    answer = raw_answer + DISCLAIMER  # บังคับเพิ่มด้วยโค้ด ไม่พึ่ง LLM ทำตาม prompt เพียงอย่างเดียว
 
     CONFIDENCE_THRESHOLD = 0.3
     if len(scores) == 0 or max(scores) < CONFIDENCE_THRESHOLD:
