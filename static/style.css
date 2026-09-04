@@ -21,8 +21,21 @@ input {
     font-size: 16px;
 }
 
+.app-footnote {
+    text-align: center;
+    font-size: 13px;
+    color: #888;
+    margin-top: 14px;
+    line-height: 1.5;
+}
+
 .page-title {
     text-align: center;
+    white-space: nowrap; /* ห้ามตัดขึ้นบรรทัดใหม่แม้จอแคบ */
+    overflow: hidden;
+    /* ย่อขนาดตัวอักษรตามความกว้างจอแทนการตัดคำ กันล้นขอบจอตอนจอแคบมากๆ
+       clamp(ขั้นต่ำ, ค่าที่ปรับตาม viewport, ขั้นสูงสุด) */
+    font-size: clamp(1.1rem, 5vw, 2rem);
 }
 
 /* ให้ input+ปุ่มถาม ขยายเต็มความกว้างเท่ากล่องแชท (#answerBox) ด้านล่าง — เดิม input width:70%
