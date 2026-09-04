@@ -41,10 +41,12 @@
         </div>
     </nav>
 
-    <h1>⚖️ ผู้ช่วยความรู้กฎหมายเบื้องต้น</h1>
+    <h1 class="page-title">⚖️ ผู้ช่วยความรู้กฎหมายเบื้องต้น</h1>
 
-    <input type="text" id="questionInput" placeholder="พิมพ์คำถามเกี่ยวกับกฎหมายที่ท่านสงสัย">
-    <button onclick="askQuestion()">ถาม</button>
+    <div class="ask-row">
+        <input type="text" id="questionInput" placeholder="พิมพ์คำถามเกี่ยวกับกฎหมายที่ท่านสงสัย">
+        <button onclick="askQuestion()">ถาม</button>
+    </div>
 
     <div id="loading" style="display:none;">กำลังคิด...</div>
     <div id="answerBox"></div>
