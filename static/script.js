@@ -16,6 +16,10 @@ async function askQuestion() {
     const query = input.value.trim();
     if (!query) return;
 
+    appendChatMessage("user", query); // โชว์คำถามทันที ไม่ต้องรอคำตอบ ให้ความรู้สึกเหมือนแชทจริง
+    input.value = "";
+    scrollChatToBottom();
+
     document.getElementById("loading").style.display = "block";
 
     try {
@@ -29,10 +33,8 @@ async function askQuestion() {
         if (!response.ok) throw new Error(data.detail || ("HTTP " + response.status));
 
         document.getElementById("loading").style.display = "none";
-        const rawHtml = marked.parse(data.answer);
-        const cleanHtml = DOMPurify.sanitize(rawHtml);
-        document.getElementById("answerBox").innerHTML = cleanHtml;
-        input.value = "";
+        appendChatMessage("assistant", data.answer);
+        scrollChatToBottom();
 
         if (currentUser && data.chat_id) {
             currentChatId = data.chat_id;
@@ -41,8 +43,29 @@ async function askQuestion() {
 
     } catch (error) {
         document.getElementById("loading").style.display = "none";
-        document.getElementById("answerBox").innerText = "เกิดข้อผิดพลาด: " + error;
+        appendChatMessage("assistant", "⚠️ เกิดข้อผิดพลาด: " + error);
+        scrollChatToBottom();
     }
+}
+
+// ---------- Helpers สำหรับต่อข้อความเข้ากล่องแชท (ใช้ร่วมกันทั้งถามใหม่และโหลดแชทเก่า) ----------
+function appendChatMessage(role, content) {
+    const box = document.getElementById("answerBox");
+    const wrapper = document.createElement("div");
+    wrapper.className = role === "user" ? "chat-msg chat-msg-user" : "chat-msg chat-msg-assistant";
+
+    if (role === "user") {
+        wrapper.textContent = content;
+    } else {
+        const rawHtml = marked.parse(content);
+        wrapper.innerHTML = DOMPurify.sanitize(rawHtml);
+    }
+    box.appendChild(wrapper);
+}
+
+function scrollChatToBottom() {
+    const box = document.getElementById("answerBox");
+    box.scrollTop = box.scrollHeight;
 }
 
 // =====================================================================
@@ -662,19 +685,8 @@ async function handleDeleteChat(chatId) {
 function renderChatTranscript(messages) {
     const box = document.getElementById("answerBox");
     box.innerHTML = "";
-
-    messages.forEach(msg => {
-        const wrapper = document.createElement("div");
-        wrapper.className = msg.role === "user" ? "chat-msg chat-msg-user" : "chat-msg chat-msg-assistant";
-
-        if (msg.role === "user") {
-            wrapper.textContent = msg.content;
-        } else {
-            const rawHtml = marked.parse(msg.content);
-            wrapper.innerHTML = DOMPurify.sanitize(rawHtml);
-        }
-        box.appendChild(wrapper);
-    });
+    messages.forEach(msg => appendChatMessage(msg.role, msg.content));
+    scrollChatToBottom();
 }
 
 function startNewChat() {
