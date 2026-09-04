@@ -21,6 +21,26 @@ input {
     font-size: 16px;
 }
 
+.page-title {
+    text-align: center;
+}
+
+/* ให้ input+ปุ่มถาม ขยายเต็มความกว้างเท่ากล่องแชท (#answerBox) ด้านล่าง — เดิม input width:70%
+   ทำให้แถบนี้สั้นกว่ากล่องด้านล่าง มองแล้วเยื้องไม่ตรงกัน */
+.ask-row {
+    display: flex;
+    gap: 8px;
+}
+
+.ask-row input {
+    flex: 1;
+    width: auto; /* ทับ input{width:70%} ด้านบน เฉพาะในแถบนี้ */
+}
+
+.ask-row button {
+    flex-shrink: 0;
+}
+
 button {
     padding: 10px 20px;
     font-size: 16px;
