@@ -76,6 +76,7 @@ function openSidebar() {
     document.getElementById("sideMenu").setAttribute("aria-hidden", "false");
     document.getElementById("sidebarBackdrop").hidden = false;
     document.getElementById("sidebarToggle").setAttribute("aria-expanded", "true");
+    document.getElementById("sidebarToggle").hidden = true; // ซ่อนปุ่มเปิด กันชนกับแถบหัว sidebar ที่มีปุ่มปิด (✕) อยู่แล้ว
 }
 
 function closeSidebar() {
@@ -83,6 +84,7 @@ function closeSidebar() {
     document.getElementById("sideMenu").setAttribute("aria-hidden", "true");
     document.getElementById("sidebarBackdrop").hidden = true;
     document.getElementById("sidebarToggle").setAttribute("aria-expanded", "false");
+    document.getElementById("sidebarToggle").hidden = false; // เอาปุ่มกลับมาโชว์ตอนปิด sidebar แล้ว
 }
 
 document.getElementById("sidebarToggle").addEventListener("click", openSidebar);
