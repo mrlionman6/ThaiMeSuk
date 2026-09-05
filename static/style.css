@@ -538,6 +538,10 @@ button {
     box-sizing: border-box;
 }
 
+.modal-card-wide {
+    max-width: 700px; /* กว้างกว่าปกติ ใช้กับ popup ที่มี textarea ยาวๆ เช่นขยายช่องพิมพ์คำถาม */
+}
+
 .modal-card h2 {
     margin-top: 0;
     margin-bottom: 16px;
