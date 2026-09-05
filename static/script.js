@@ -9,15 +9,55 @@ let forgotPasswordUsername = null;
 const ROLE_LABELS_JS = { 1: "ระดับ 1", 2: "ระดับ 2", 3: "ระดับ 3" };
 
 // =====================================================================
+// แนบภาพ (ต้อง login) — เลือกไฟล์แล้วโชว์ชื่อไฟล์เป็น chip เล็กๆ ใต้ช่องพิมพ์
+// =====================================================================
+function handleImageSelected() {
+    const imageInput = document.getElementById("imageAttachInput");
+    const file = imageInput.files[0];
+    if (!file) return;
+
+    if (!currentUser) {
+        alert("กรุณาเข้าสู่ระบบก่อนใช้ฟีเจอร์แนบภาพ");
+        imageInput.value = "";
+        return;
+    }
+
+    const maxSizeBytes = 5 * 1024 * 1024; // ต้องตรงกับ MAX_IMAGE_SIZE_BYTES ฝั่ง backend
+    if (file.size > maxSizeBytes) {
+        alert("ไฟล์ภาพใหญ่เกินไป (จำกัดไม่เกิน 5MB)");
+        imageInput.value = "";
+        return;
+    }
+
+    document.getElementById("imageAttachName").textContent = "📎 " + file.name;
+    document.getElementById("imageAttachPreview").hidden = false;
+}
+
+function clearImageAttachment() {
+    document.getElementById("imageAttachInput").value = "";
+    document.getElementById("imageAttachPreview").hidden = true;
+}
+
+// =====================================================================
 // ถาม-ตอบหลัก
 // =====================================================================
 async function askQuestion() {
     const input = document.getElementById("questionInput");
     const query = input.value.trim();
-    if (!query) return;
+    const imageInput = document.getElementById("imageAttachInput");
+    const imageFile = imageInput.files[0] || null;
 
-    appendChatMessage("user", query); // โชว์คำถามทันที ไม่ต้องรอคำตอบ ให้ความรู้สึกเหมือนแชทจริง
+    if (!query && !imageFile) return;
+
+    // สร้าง FormData ไว้ก่อนเคลียร์ input (multipart/form-data รองรับทั้งข้อความและไฟล์ในคำขอเดียว)
+    const formData = new FormData();
+    formData.append("query", query);
+    if (currentChatId) formData.append("chat_id", currentChatId);
+    if (imageFile) formData.append("image", imageFile);
+
+    appendChatMessage("user", query || "📎 (ส่งภาพแนบมาโดยไม่มีข้อความ)");
     input.value = "";
+    clearImageAttachment();
     scrollChatToBottom();
 
     document.getElementById("loading").style.display = "block";
@@ -25,8 +65,7 @@ async function askQuestion() {
     try {
         const response = await fetch("/ask", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query: query, chat_id: currentChatId })
+            body: formData, // ไม่ต้องตั้ง Content-Type เอง browser จัดการ multipart boundary ให้อัตโนมัติ
         });
 
         const data = await response.json();
