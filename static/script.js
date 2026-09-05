@@ -89,6 +89,27 @@ function submitFromExpandModal() {
     askQuestion();
 }
 
+// เก็บสถานะ "กำลังรอคำตอบ" แยกตามแชท — ทำให้สลับ tab/แชทระหว่างรอได้โดยไม่งง
+// ว่าคำตอบไหนเป็นของแชทไหน และกลับมาแชทเดิมแล้วยังเห็น loading ถ้ายังไม่เสร็จจริงๆ
+let pendingChatIds = new Set(); // เก็บ chat_id (number) ที่มีคำถามค้างรอคำตอบอยู่
+let pendingNewChat = false;     // true ถ้ามีคำถามที่ยังไม่มี chat_id (เพิ่งเริ่มแชทใหม่) ค้างรออยู่
+
+function isChatPending(chatId) {
+    return chatId !== null ? pendingChatIds.has(chatId) : pendingNewChat;
+}
+
+function updateLoadingIndicator() {
+    document.getElementById("loading").hidden = !isChatPending(currentChatId);
+}
+
+function markChatPending(chatId, isPending) {
+    if (chatId !== null) {
+        if (isPending) pendingChatIds.add(chatId); else pendingChatIds.delete(chatId);
+    } else {
+        pendingNewChat = isPending;
+    }
+}
+
 async function askQuestion() {
     const input = document.getElementById("questionInput");
     const query = input.value.trim();
@@ -97,18 +118,24 @@ async function askQuestion() {
 
     if (!query && !imageFile) return;
 
+    // จำแชทที่กำลังถามไว้ ณ ตอนเริ่ม — เผื่อ user สลับไปแชทอื่นระหว่างรอคำตอบ
+    // (currentChatId ตัวแปร global อาจเปลี่ยนไปแล้วตอนคำตอบมาถึง ถ้าสลับแชทระหว่างทาง)
+    const requestChatId = currentChatId;
+
     // สร้าง FormData ไว้ก่อนเคลียร์ input (multipart/form-data รองรับทั้งข้อความและไฟล์ในคำขอเดียว)
     const formData = new FormData();
     formData.append("query", query);
-    if (currentChatId) formData.append("chat_id", currentChatId);
+    if (requestChatId) formData.append("chat_id", requestChatId);
     if (imageFile) formData.append("image", imageFile);
 
+    // โชว์คำถามทันทีถ้ายังอยู่แชทเดียวกับที่กำลังจะถาม (ควรเป็นเช่นนั้นเสมอตอนกดปุ่ม)
     appendChatMessage("user", query || "📎 (ส่งภาพแนบมาโดยไม่มีข้อความ)");
     input.value = "";
     clearImageAttachment();
     scrollChatToBottom();
 
-    document.getElementById("loading").style.display = "block";
+    markChatPending(requestChatId, true);
+    updateLoadingIndicator();
 
     try {
         const response = await fetch("/ask", {
@@ -119,20 +146,60 @@ async function askQuestion() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || ("HTTP " + response.status));
 
-        document.getElementById("loading").style.display = "none";
-        appendChatMessage("assistant", data.answer);
-        scrollChatToBottom();
+        markChatPending(requestChatId, false);
+        updateLoadingIndicator();
 
         if (currentUser && data.chat_id) {
-            currentChatId = data.chat_id;
-            loadChatHistory();
+            if (currentChatId === requestChatId) {
+                currentChatId = data.chat_id; // แชทใหม่เพิ่งได้ id จริงตอนนี้
+            }
+            loadChatHistory(); // อัปเดต sidebar เสมอ แม้ทำงานอยู่เบื้องหลัง (ไม่ได้ดูแชทนี้ตอนนี้)
         }
 
+        // โชว์คำตอบแบบ "fake streaming" เฉพาะตอนยังอยู่แชทเดียวกับที่ถามไว้เท่านั้น
+        // (คำตอบผ่านการเช็ค LanguageGuard มาครบแล้วตั้งแต่ backend ก่อนส่งมาถึงตรงนี้)
+        if (currentChatId === requestChatId) {
+            const wrapper = document.createElement("div");
+            wrapper.className = "chat-msg chat-msg-assistant";
+            document.getElementById("answerBox").appendChild(wrapper);
+            typewriterReveal(wrapper, data.answer, requestChatId);
+        }
+        // ถ้าสลับไปแชทอื่นแล้ว ไม่ต้องโชว์อะไร (จะเห็นตอนกลับมาเปิดแชทนั้นผ่าน loadChat ที่ fetch จาก server)
+
     } catch (error) {
-        document.getElementById("loading").style.display = "none";
-        appendChatMessage("assistant", "⚠️ เกิดข้อผิดพลาด: " + error);
-        scrollChatToBottom();
+        markChatPending(requestChatId, false);
+        updateLoadingIndicator();
+        if (currentChatId === requestChatId) {
+            appendChatMessage("assistant", "⚠️ เกิดข้อผิดพลาด: " + error);
+            scrollChatToBottom();
+        }
     }
+}
+
+// "Fake streaming" — คำตอบมาครบเต็มแล้วจาก backend (ผ่าน LanguageGuard retry มาแล้ว)
+// แค่ทยอย "เผย" ทีละส่วนด้วย JS ให้ดูเหมือนกำลัง generate สดๆ เฉยๆ ไม่ใช่ streaming จริงจาก network
+// เลือกใช้วิธีนี้แทน streaming จริง (มี /ask/stream ให้ใช้ได้ถ้าต้องการ) เพื่อรักษาระบบ retry ไว้
+// เพราะ retry ทำไม่ได้แล้วถ้าเริ่มโชว์บางส่วนให้ user เห็นไปแล้วผ่าน streaming จริง
+function typewriterReveal(wrapper, fullText, requestChatId) {
+    let index = 0;
+    const chunkSize = 3;   // ตัวอักษรต่อ tick — ปรับตรงนี้เพื่อปรับความเร็วการ "พิมพ์"
+    const intervalMs = 15; // ms ต่อ tick
+
+    function tick() {
+        // เช็คทุก tick กันกรณี user สลับแชทระหว่างกำลังเผยข้อความอยู่ — หยุดอัปเดตจอทันทีถ้าไม่ได้ดูแชทนี้แล้ว
+        if (currentChatId !== requestChatId) return;
+
+        index = Math.min(index + chunkSize, fullText.length);
+        const partial = fullText.slice(0, index);
+        const rawHtml = marked.parse(partial);
+        wrapper.innerHTML = DOMPurify.sanitize(rawHtml);
+        scrollChatToBottom();
+
+        if (index < fullText.length) {
+            setTimeout(tick, intervalMs);
+        }
+    }
+    tick();
 }
 
 // ---------- Helpers สำหรับต่อข้อความเข้ากล่องแชท (ใช้ร่วมกันทั้งถามใหม่และโหลดแชทเก่า) ----------
@@ -788,6 +855,7 @@ async function loadChat(chatId) {
 
         currentChatId = chatId;
         renderChatTranscript(data.messages);
+        updateLoadingIndicator(); // ถ้าแชทนี้ยังมีคำถามค้างรอคำตอบอยู่ (ถามไว้ตอนอยู่แชทอื่น) ให้โชว์ loading กลับมา
         loadChatHistory();
         closeSidebar();
     } catch (error) {
@@ -825,6 +893,7 @@ function startNewChat() {
     document.getElementById("answerBox").innerHTML = "";
     document.getElementById("questionInput").value = "";
     updateTitleVisibility(); // แชทว่างแล้ว → โชว์ข้อความทักทายกลับมา
+    updateLoadingIndicator(); // เผื่อมีคำถามใหม่ (ที่ยังไม่มี id) ค้างรออยู่ตอนกด "แชทใหม่" ซ้อนอีกที
     loadChatHistory();
     closeSidebar();
 }
