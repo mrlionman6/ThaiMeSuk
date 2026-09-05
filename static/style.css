@@ -42,23 +42,44 @@ input {
    ทำให้แถบนี้สั้นกว่ากล่องด้านล่าง มองแล้วเยื้องไม่ตรงกัน */
 .ask-row {
     display: flex;
+    flex-direction: column; /* input เต็มแถวด้านบน ปุ่มอยู่แถวล่าง (เหมือน UI แชทของ Claude เอง) */
     gap: 8px;
-    flex-wrap: wrap; /* ปุ่ม "แนบเอกสารทางกฎหมาย" ข้อความยาว บนจอแคบให้ตกลงบรรทัดใหม่แทนบีบช่องพิมพ์จนแคบเกิน */
 }
 
 .ask-row input {
-    flex: 1 1 200px; /* ยืดเต็มพื้นที่ปกติ แต่ยอมหดได้ถึง 200px ก่อนจะตกบรรทัดใหม่ */
-    width: auto; /* ทับ input{width:70%} ด้านบน เฉพาะในแถบนี้ */
+    width: 100%;
+    box-sizing: border-box;
 }
 
-.ask-row button {
+.ask-controls {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+.ask-controls button {
     flex-shrink: 0;
+    font-size: 13px;
+    padding: 6px 12px; /* เล็กลงกว่าปุ่มปกติ ตามที่ขอ */
 }
 
 #attachImageBtn {
-    padding: 10px 14px;
-    font-size: 14px;
     white-space: nowrap; /* กันข้อความยาวตัดขึ้นบรรทัดใหม่จนปุ่มเสียรูป */
+}
+
+/* ---------- Popup ขยายช่องพิมพ์ (ตอนพิมพ์ยาวเกินกรอบ) ---------- */
+.input-expand-textarea {
+    width: 100%;
+    min-height: 160px;
+    max-height: 50vh;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 10px;
+    font-family: inherit;
+    font-size: 15px;
+    line-height: 1.5;
+    resize: vertical;
+    margin-bottom: 10px;
 }
 
 .image-attach-preview {
@@ -475,6 +496,19 @@ button {
 .chat-msg-user {
     background: #f4f4f4;
     font-weight: bold;
+    cursor: pointer;
+}
+
+.chat-msg-user.truncatable {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-msg-user.truncatable.expanded {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
 }
 
 .chat-msg-assistant {
