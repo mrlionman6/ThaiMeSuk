@@ -317,9 +317,13 @@ def describe_image_for_retrieval(image_data: dict, query: str) -> tuple[bool, st
     print(f"[ImageGuard] relevant={is_relevant} detail={detail!r}")
     return is_relevant, detail
 
-def rag_answer(query, history=None, image_data=None):
-    history = history or []
+def _prepare_rag_context(query, history, image_data):
+    """ขั้นตอนเตรียมข้อมูลทั้งหมดก่อนเรียก Claude ตัวตอบจริง — ใช้ร่วมกันทั้งโหมด
+    non-streaming (rag_answer) และ streaming (rag_answer_stream) กันโค้ดซ้ำซ้อน
 
+    คืนค่า dict เสมอ:
+    - ถ้าภาพไม่เกี่ยวข้อง: {"early_exit": True, "message": ...}
+    - ถ้าพร้อมส่ง Claude: {"early_exit": False, "system_prompt":..., "messages":..., "top_chunks":..., "scores":...}"""
     # ถ้ามีภาพแนบมา: ให้ Haiku เช็คความเกี่ยวข้อง + อ่านภาพสรุปเป็นข้อความก่อน เอาไปรวมกับคำถาม (ถ้ามี)
     # เพื่อใช้เป็น query สำหรับค้นหาใน KB — จำเป็นเพราะ embedding model อ่านภาพตรงๆ ไม่ได้
     if image_data:
@@ -327,10 +331,11 @@ def rag_answer(query, history=None, image_data=None):
         if not is_relevant:
             # ตัดจบตั้งแต่ต้น ไม่ส่งต่อเข้า pipeline เต็ม — กันการใช้ในทางที่ผิด (เช่นภาพมีข้อความ
             # แฝงคำสั่ง) และประหยัด cost (ไม่ต้องเรียก Claude ตัวใหญ่ถ้าภาพไม่เกี่ยวกับกฎหมายเลย)
-            return (
+            message = (
                 f"ภาพที่แนบมาดูไม่เกี่ยวข้องกับกฎหมายหรือเอกสารครับ ({image_summary}) "
                 "กรุณาแนบภาพเอกสาร สัญญา หรือหนังสือที่เกี่ยวข้องกับคำถามด้านกฎหมายแทนนะครับ"
-            ), []
+            )
+            return {"early_exit": True, "message": message}
         query_for_search = f"{query}\n{image_summary}".strip() if query else image_summary
     else:
         query_for_search = query
@@ -381,13 +386,38 @@ def rag_answer(query, history=None, image_data=None):
     messages = [{"role": m["role"], "content": m["content"]} for m in recent_history]
     messages.append({"role": "user", "content": current_turn_content})
 
+    return {
+        "early_exit": False,
+        "system_prompt": system_prompt,
+        "messages": messages,
+        "top_chunks": top_chunks,
+        "scores": scores,
+    }
+
+
+def _log_if_low_confidence(query, answer, top_chunks, scores):
+    CONFIDENCE_THRESHOLD = 0.3
+    if len(scores) == 0 or max(scores) < CONFIDENCE_THRESHOLD:
+        log_query_text = query if query else "(คำถามจากภาพแนบ ไม่มีข้อความ)"
+        log_low_confidence_query(log_query_text, answer, top_chunks, max(scores) if scores else 0)
+
+
+def rag_answer(query, history=None, image_data=None):
+    """เวอร์ชันไม่ stream — รอคำตอบเต็มก่อนคืนค่าทีเดียว มี LanguageGuard retry
+    (ยังเก็บไว้เผื่อใช้ที่อื่น เช่นเทส/สคริปต์ที่ไม่ต้องการ streaming)"""
+    history = history or []
+    ctx = _prepare_rag_context(query, history, image_data)
+
+    if ctx["early_exit"]:
+        return ctx["message"], []
+
     raw_answer = ""
     for attempt in range(1, MAX_ANSWER_RETRIES + 2):  # ลองครั้งแรก + retry อีก MAX_ANSWER_RETRIES ครั้ง
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1500,
-            system=system_prompt,
-            messages=messages,
+            system=ctx["system_prompt"],
+            messages=ctx["messages"],
         )
         raw_answer = response.content[0].text.strip()
 
@@ -398,13 +428,44 @@ def rag_answer(query, history=None, image_data=None):
         print("[LanguageGuard] ลองใหม่ครบจำนวนแล้วแต่ยังเจอปัญหา — ส่งคำตอบล่าสุดกลับไปทั้งที่ยังมีปัญหา")
 
     answer = raw_answer  # เก็บคำตอบดิบสะอาดๆ ไม่ปน disclaimer แล้ว (ย้ายไปแสดงถาวรใต้กล่องแชทแทน กันปนเข้า KB ตอน admin approve)
+    _log_if_low_confidence(query, answer, ctx["top_chunks"], ctx["scores"])
+    return answer, ctx["top_chunks"]
 
-    CONFIDENCE_THRESHOLD = 0.3
-    if len(scores) == 0 or max(scores) < CONFIDENCE_THRESHOLD:
-        log_query_text = query if query else "(คำถามจากภาพแนบ ไม่มีข้อความ)"
-        log_low_confidence_query(log_query_text, answer, top_chunks, max(scores) if scores else 0)
 
-    return answer, top_chunks
+def rag_answer_stream(query, history=None, image_data=None):
+    """เวอร์ชัน streaming จริง — yield คำตอบออกมาทีละ chunk ตามที่ Claude generate จริง
+    (ไม่ใช่ generate เสร็จแล้วค่อยแบ่งส่งทีหลัง) ใช้กับ /ask/stream
+
+    yield dict เสมอ:
+    - {"type": "delta", "text": ...} ระหว่างทาง (คำตอบทยอยมาทีละส่วน)
+    - {"type": "done", "sources": [...], "full_answer": ...} ก้อนสุดท้ายก้อนเดียว
+
+    หมายเหตุ trade-off สำคัญ: โหมดนี้ไม่มี LanguageGuard retry เหมือน rag_answer() ธรรมดา
+    เพราะ retry ทำไม่ได้แล้วหลังจากเริ่มส่งข้อความบางส่วนให้ user เห็นไปแล้ว (ย้อนกลับไม่ได้)
+    ยอมรับความเสี่ยงนี้เพื่อแลกกับการได้ streaming จริง — เป็น trade-off เดียวกับที่ระบบ
+    production ส่วนใหญ่ที่ใช้ streaming ยอมรับกัน (เทียบ latency ที่ลดลงกับความเสี่ยงที่เพิ่มขึ้นเล็กน้อย)"""
+    history = history or []
+    ctx = _prepare_rag_context(query, history, image_data)
+
+    if ctx["early_exit"]:
+        yield {"type": "delta", "text": ctx["message"]}
+        yield {"type": "done", "sources": [], "full_answer": ctx["message"]}
+        return
+
+    full_answer = ""
+    with client.messages.stream(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1500,
+        system=ctx["system_prompt"],
+        messages=ctx["messages"],
+    ) as stream:
+        for text_chunk in stream.text_stream:
+            full_answer += text_chunk
+            yield {"type": "delta", "text": text_chunk}
+
+    full_answer = full_answer.strip()
+    _log_if_low_confidence(query, full_answer, ctx["top_chunks"], ctx["scores"])
+    yield {"type": "done", "sources": ctx["top_chunks"], "full_answer": full_answer}
 
 # ---------- Pydantic Models (ต้องประกาศก่อนใช้งานด้านล่าง) ----------
 class LogAction(BaseModel):
@@ -460,17 +521,12 @@ class UpdateUserRoleRequest(BaseModel):
     role: int
 
 # ---------- User API ----------
-@app.post("/ask")
-async def ask_question(
-    request: Request,
-    query: str = Form(""),
-    chat_id: Optional[int] = Form(None),
-    image: Optional[UploadFile] = File(None),
-):
+async def _parse_and_validate_ask_input(query: str, chat_id: Optional[int], image: Optional[UploadFile], user_id: Optional[int]):
+    """โค้ดร่วมกันระหว่าง /ask (เดิม) และ /ask/stream (ใหม่) — parse/validate ภาพแนบ,
+    เช็ค ownership ของแชท, ดึงประวัติสนทนา กันเขียนโค้ดซ้ำ 2 endpoint
+    คืนค่า (query, image_data, history) หรือ raise HTTPException ถ้าข้อมูลไม่ถูกต้อง"""
     query = query.strip()
-    user_id = get_active_user_id(request)
 
-    # ---------- จัดการภาพแนบ (ถ้ามี) — จำกัดเฉพาะ user ที่ login ----------
     image_data = None
     if image is not None:
         if not user_id:
@@ -503,16 +559,31 @@ async def ask_question(
             raise HTTPException(status_code=404, detail="ไม่พบแชทนี้")
         history = get_chat_messages(chat_id)
 
+    return query, image_data, history
+
+
+def _build_saved_query(query: str, image_data: Optional[dict]) -> str:
+    """ไม่เก็บภาพจริงลง DB เลย (กัน DB บวมจาก base64) แต่ยังเก็บข้อความไว้ให้ดูย้อนได้เสมอ
+    ถ้ามีภาพแนบมาด้วย ใส่ marker ให้รู้ตอนดูย้อนว่าเทิร์นนี้เคยมีภาพประกอบ (ตัวภาพเองไม่ได้ถูกเก็บไว้)"""
+    if image_data is not None:
+        return f"📎 [แนบภาพ] {query}".strip() if query else "📎 [แนบภาพ] (ไม่มีข้อความ)"
+    return query
+
+
+@app.post("/ask")
+async def ask_question(
+    request: Request,
+    query: str = Form(""),
+    chat_id: Optional[int] = Form(None),
+    image: Optional[UploadFile] = File(None),
+):
+    user_id = get_active_user_id(request)
+    query, image_data, history = await _parse_and_validate_ask_input(query, chat_id, image, user_id)
+
     answer, sources = rag_answer(query, history=history, image_data=image_data)
 
     if user_id:
-        # ไม่เก็บภาพจริงลง DB เลย (กัน DB บวมจาก base64) แต่ยังเก็บข้อความคำถาม/คำตอบไว้ให้ดูย้อนได้เสมอ
-        # ถ้ามีภาพแนบมาด้วย ใส่ marker ให้รู้ตอนดูย้อนว่าเทิร์นนี้เคยมีภาพประกอบ (ตัวภาพเองไม่ได้ถูกเก็บไว้)
-        if image_data is not None:
-            saved_query = f"📎 [แนบภาพ] {query}".strip() if query else "📎 [แนบภาพ] (ไม่มีข้อความ)"
-        else:
-            saved_query = query
-
+        saved_query = _build_saved_query(query, image_data)
         if chat_id is None:
             # ยังไม่มีแชทอยู่ (ผู้ใช้เพิ่งเริ่มถามคำถามแรก) — สร้างแชทใหม่ ตั้งชื่อจากคำถามแรก
             title = saved_query.strip()[:50] or "แชทใหม่"
@@ -523,6 +594,48 @@ async def ask_question(
         touch_chat_session(chat_id)
 
     return {"answer": answer, "sources": sources, "chat_id": chat_id}
+
+
+@app.post("/ask/stream")
+async def ask_question_stream(
+    request: Request,
+    query: str = Form(""),
+    chat_id: Optional[int] = Form(None),
+    image: Optional[UploadFile] = File(None),
+):
+    """เหมือน /ask ทุกอย่าง แต่ส่งคำตอบกลับแบบ streaming จริง (ทยอยส่งตามที่ Claude generate จริง
+    ไม่ใช่รอ generate ครบแล้วค่อยแบ่งส่งทีหลัง) — ฟอร์แมต NDJSON (1 JSON object ต่อ 1 บรรทัด):
+    บรรทัดกลางทาง: {"type": "delta", "text": "..."}  ← คำตอบทยอยมาทีละส่วน
+    บรรทัดสุดท้าย: {"type": "done", "chat_id": ..., "sources": [...]}"""
+    user_id = get_active_user_id(request)
+    query, image_data, history = await _parse_and_validate_ask_input(query, chat_id, image, user_id)
+
+    def event_generator():
+        nonlocal chat_id
+        for event in rag_answer_stream(query, history=history, image_data=image_data):
+            if event["type"] == "delta":
+                yield json.dumps({"type": "delta", "text": event["text"]}, ensure_ascii=False) + "\n"
+            else:  # event["type"] == "done"
+                full_answer = event["full_answer"]
+                sources = event["sources"]
+                final_chat_id = chat_id
+
+                if user_id:
+                    saved_query = _build_saved_query(query, image_data)
+                    if final_chat_id is None:
+                        title = saved_query.strip()[:50] or "แชทใหม่"
+                        final_chat_id = create_chat_session(user_id, title=title)
+
+                    add_chat_message(final_chat_id, "user", saved_query)
+                    add_chat_message(final_chat_id, "assistant", full_answer)
+                    touch_chat_session(final_chat_id)
+
+                yield json.dumps(
+                    {"type": "done", "chat_id": final_chat_id, "sources": sources},
+                    ensure_ascii=False,
+                ) + "\n"
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 # ---------- Auth API (สำหรับผู้ใช้ทั่วไป — แยกจาก admin) ----------
 @app.get("/api/auth/security-questions")
