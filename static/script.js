@@ -69,7 +69,7 @@ function openInputExpandModal() {
             <button type="button" onclick="document.getElementById('imageAttachInput').click()">แนบเอกสารทางกฎหมาย</button>
             <button onclick="submitFromExpandModal()">ถาม</button>
         </div>
-    `);
+    `, "modal-card-wide");
 
     const textarea = document.getElementById("questionExpandTextarea");
     textarea.focus();
@@ -211,14 +211,17 @@ document.addEventListener("keydown", (e) => {
 // =====================================================================
 // Modal (ใช้ร่วมกัน: login / register / forgot password / profile)
 // =====================================================================
-function openModal(html) {
-    document.getElementById("modalContent").innerHTML = html;
+function openModal(html, extraClass) {
+    const modalContent = document.getElementById("modalContent");
+    modalContent.className = "modal-card" + (extraClass ? " " + extraClass : ""); // reset แล้วค่อยเติม class พิเศษ กันค้างจาก modal ก่อนหน้า
+    modalContent.innerHTML = html;
     document.getElementById("modalBackdrop").hidden = false;
 }
 
 function closeModal() {
     document.getElementById("modalBackdrop").hidden = true;
     document.getElementById("modalContent").innerHTML = "";
+    document.getElementById("modalContent").className = "modal-card"; // reset กลับค่าเริ่มต้นเสมอ
 }
 
 // เช็คทั้ง mousedown และ click ต้องเกิดบน backdrop เดียวกัน ถึงจะปิด modal
