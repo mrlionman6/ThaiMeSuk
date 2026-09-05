@@ -43,10 +43,11 @@ input {
 .ask-row {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap; /* ปุ่ม "แนบเอกสารทางกฎหมาย" ข้อความยาว บนจอแคบให้ตกลงบรรทัดใหม่แทนบีบช่องพิมพ์จนแคบเกิน */
 }
 
 .ask-row input {
-    flex: 1;
+    flex: 1 1 200px; /* ยืดเต็มพื้นที่ปกติ แต่ยอมหดได้ถึง 200px ก่อนจะตกบรรทัดใหม่ */
     width: auto; /* ทับ input{width:70%} ด้านบน เฉพาะในแถบนี้ */
 }
 
@@ -56,7 +57,8 @@ input {
 
 #attachImageBtn {
     padding: 10px 14px;
-    font-size: 18px;
+    font-size: 14px;
+    white-space: nowrap; /* กันข้อความยาวตัดขึ้นบรรทัดใหม่จนปุ่มเสียรูป */
 }
 
 .image-attach-preview {
