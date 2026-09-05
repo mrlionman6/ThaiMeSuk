@@ -224,6 +224,28 @@ function closeModal() {
     document.getElementById("modalContent").className = "modal-card"; // reset กลับค่าเริ่มต้นเสมอ
 }
 
+// popup ยืนยันแบบเดียวกับดีไซน์เว็บ (แทน browser confirm() เดิมที่หน้าตาไม่เข้ากับแอป)
+// ใช้แบบ callback เพราะ modal เปิดแบบ async ไม่ block โค้ดต่อจากนี้เหมือน confirm() ของ browser
+function showConfirmDialog(message, onConfirm, options = {}) {
+    const confirmText = options.confirmText || "ตกลง";
+    const cancelText = options.cancelText || "ยกเลิก";
+    const onCancel = options.onCancel || closeModal; // ปกติกด "ยกเลิก" แล้วปิด modal เฉยๆ แต่บาง flow (เช่นลบบัญชีจากหน้าโปรไฟล์) อยากกลับไป modal เดิมแทน
+
+    openModal(`
+        <p class="confirm-dialog-message">${escapeHtml(message)}</p>
+        <div class="modal-buttons">
+            <button type="button" id="confirmDialogCancelBtn">${escapeHtml(cancelText)}</button>
+            <button type="button" id="confirmDialogOkBtn" class="danger-btn">${escapeHtml(confirmText)}</button>
+        </div>
+    `);
+
+    document.getElementById("confirmDialogOkBtn").onclick = () => {
+        closeModal();
+        onConfirm();
+    };
+    document.getElementById("confirmDialogCancelBtn").onclick = onCancel;
+}
+
 // เช็คทั้ง mousedown และ click ต้องเกิดบน backdrop เดียวกัน ถึงจะปิด modal
 // (ถ้าเช็คแค่ click อย่างเดียว: ลาก select ข้อความในกล่องแล้วปล่อยเมาส์นอกกล่อง
 // จะถูกนับเป็น "คลิกที่ backdrop" ทั้งที่ตั้งใจแค่ลากเลือกข้อความ ไม่ได้ตั้งใจปิด)
@@ -669,7 +691,7 @@ async function handleChangePassword() {
     }
 }
 
-async function handleDeleteAccount() {
+function handleDeleteAccount() {
     const password = document.getElementById("deleteAccountPassword").value;
     const statusEl = document.getElementById("deleteStatus");
 
@@ -679,28 +701,31 @@ async function handleDeleteAccount() {
         return;
     }
 
-    if (!confirm("ยืนยันลบบัญชีถาวร? ข้อมูลทั้งหมดจะหายและกู้คืนไม่ได้")) return;
+    showConfirmDialog(
+        "ยืนยันลบบัญชีถาวร? ข้อมูลทั้งหมดจะหายและกู้คืนไม่ได้",
+        async () => {
+            try {
+                const res = await fetch("/api/auth/account", {
+                    method: "DELETE",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ password })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || "ลบบัญชีไม่สำเร็จ");
 
-    try {
-        const res = await fetch("/api/auth/account", {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ password })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "ลบบัญชีไม่สำเร็จ");
-
-        currentUser = null;
-        currentChatId = null;
-        closeModal();
-        renderUserArea();
-        resetChatHistoryUI();
-        document.getElementById("answerBox").innerHTML = "";
-        alert("ลบบัญชีเรียบร้อยแล้ว");
-    } catch (error) {
-        statusEl.textContent = "❌ " + error;
-        statusEl.style.color = "red";
-    }
+                currentUser = null;
+                currentChatId = null;
+                closeModal();
+                renderUserArea();
+                resetChatHistoryUI();
+                document.getElementById("answerBox").innerHTML = "";
+                alert("ลบบัญชีเรียบร้อยแล้ว");
+            } catch (error) {
+                alert("ลบบัญชีไม่สำเร็จ: " + error);
+            }
+        },
+        { onCancel: () => openProfileModal() } // กด "ยกเลิก" กลับไปหน้าโปรไฟล์เดิม ไม่ใช่ปิด modal ทั้งหมด
+    );
 }
 
 // =====================================================================
@@ -770,21 +795,21 @@ async function loadChat(chatId) {
     }
 }
 
-async function handleDeleteChat(chatId) {
-    if (!confirm("ลบแชทนี้ถาวร?")) return;
+function handleDeleteChat(chatId) {
+    showConfirmDialog("ลบแชทนี้ถาวร?", async () => {
+        try {
+            const res = await fetch("/api/chats/" + chatId, { method: "DELETE" });
+            if (!res.ok) throw new Error("HTTP " + res.status);
 
-    try {
-        const res = await fetch("/api/chats/" + chatId, { method: "DELETE" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-
-        if (currentChatId === chatId) {
-            currentChatId = null;
-            document.getElementById("answerBox").innerHTML = "";
+            if (currentChatId === chatId) {
+                currentChatId = null;
+                document.getElementById("answerBox").innerHTML = "";
+            }
+            loadChatHistory();
+        } catch (error) {
+            alert("ลบแชทไม่สำเร็จ: " + error);
         }
-        loadChatHistory();
-    } catch (error) {
-        alert("ลบแชทไม่สำเร็จ: " + error);
-    }
+    });
 }
 
 function renderChatTranscript(messages) {
