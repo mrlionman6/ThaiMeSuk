@@ -790,3 +790,56 @@ button {
 .side-chat-delete:hover {
     color: #c0392b;
 }
+
+/* ---------- Loading indicator: spinner 6 จุดหมุนวงกลม ลอยด้านบนจอ ---------- */
+.top-loading-indicator {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 40; /* ต่ำกว่า modal (50) แต่สูงกว่าเนื้อหาปกติ ลอยทับได้ทุกหน้า */
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    padding: 8px 16px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+
+.loading-text {
+    font-size: 13px;
+    color: #666;
+}
+
+.spinner-dots {
+    position: relative;
+    width: 18px;
+    height: 18px;
+}
+
+.spinner-dots span {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    top: 50%;
+    left: 50%;
+    margin: -2px 0 0 -2px;
+    background: #333;
+    border-radius: 50%;
+    animation: spinner-dot-fade 1.2s linear infinite;
+}
+
+/* วางจุดทั้ง 6 รอบวงกลม ห่างกันจุดละ 60 องศา (360/6) แล้วหน่วงเวลาให้ไล่กันดูเหมือนหมุน */
+.spinner-dots span:nth-child(1) { transform: rotate(0deg) translateY(-7px); animation-delay: -1.0s; }
+.spinner-dots span:nth-child(2) { transform: rotate(60deg) translateY(-7px); animation-delay: -0.83s; }
+.spinner-dots span:nth-child(3) { transform: rotate(120deg) translateY(-7px); animation-delay: -0.66s; }
+.spinner-dots span:nth-child(4) { transform: rotate(180deg) translateY(-7px); animation-delay: -0.5s; }
+.spinner-dots span:nth-child(5) { transform: rotate(240deg) translateY(-7px); animation-delay: -0.33s; }
+.spinner-dots span:nth-child(6) { transform: rotate(300deg) translateY(-7px); animation-delay: -0.16s; }
+
+@keyframes spinner-dot-fade {
+    0%, 100% { opacity: 0.15; }
+    50% { opacity: 1; }
+}
