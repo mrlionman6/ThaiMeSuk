@@ -41,6 +41,7 @@ import os
 import io
 import re
 import json
+import base64
 import time
 import string
 import random
@@ -87,6 +88,10 @@ CAPTCHA_CHARS = "".join(c for c in CAPTCHA_CHARS if c not in "O0I1")
 # ---------- Conversational RAG: จำกัดขนาดประวัติที่ส่งกลับทุกครั้ง กัน token บวมเมื่อแชทยาวขึ้น ----------
 MAX_HISTORY_MESSAGES = 10  # 5 คู่ (user+assistant) ล่าสุด ที่ส่งให้ Claude ตัวจริงดูประกอบตอบ
 REWRITER_HISTORY_MESSAGES = 6  # 3 คู่ล่าสุด ที่ส่งให้ Query Rewriter ดูประกอบ (ไม่ต้องเยอะเท่า main context)
+
+# ---------- ฟีเจอร์แนบภาพ (อ่านข้อความจากภาพด้วย Claude Vision) — จำกัดเฉพาะ user ที่ login ----------
+MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 # ---------- โหลดโมเดล ----------
 print("กำลังโหลดโมเดล...")
@@ -265,10 +270,51 @@ def contains_unexpected_script(text: str) -> bool:
 
 MAX_ANSWER_RETRIES = 2  # ลองใหม่ได้สูงสุดกี่ครั้งถ้าเจอภาษาแปลกปลอม ก่อนยอมส่งคำตอบล่าสุดกลับไป
 
-def rag_answer(query, history=None):
+def describe_image_for_retrieval(image_data: dict, query: str) -> str:
+    """ใช้ Claude Haiku (vision) อ่าน/สรุปเนื้อหาสำคัญในภาพเป็นข้อความสั้นๆ
+    เพื่อเอาไปใช้เป็นส่วนหนึ่งของ query สำหรับค้นหาใน Knowledge Base
+    (จำเป็นเพราะ embedding model — multilingual-e5-large — เป็น text-only ป้อนภาพเข้าตรงๆ ไม่ได้)"""
+    prompt_text = (
+        "อ่านภาพนี้แล้วสรุปเนื้อหาสำคัญที่เกี่ยวข้องกับกฎหมาย/สัญญา/เอกสารในภาพ "
+        "เป็นข้อความสั้นๆ กระชับ (ไม่เกิน 3-4 ประโยค) เพื่อใช้ประกอบการค้นหาข้อมูลต่อ ตอบเป็นภาษาไทย"
+    )
+    if query:
+        prompt_text += f"\n\nคำถามที่ผู้ใช้ถามเกี่ยวกับภาพนี้: {query}"
+
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=300,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image_data["media_type"],
+                        "data": image_data["base64"],
+                    },
+                },
+                {"type": "text", "text": prompt_text},
+            ],
+        }],
+    )
+    summary = response.content[0].text.strip()
+    print(f"[ImageReader] summary={summary!r}")
+    return summary
+
+def rag_answer(query, history=None, image_data=None):
     history = history or []
 
-    search_query = rewrite_query_for_retrieval(query, history)
+    # ถ้ามีภาพแนบมา: ให้ Haiku อ่านภาพสรุปเป็นข้อความก่อน เอาไปรวมกับคำถาม (ถ้ามี)
+    # เพื่อใช้เป็น query สำหรับค้นหาใน KB — จำเป็นเพราะ embedding model อ่านภาพตรงๆ ไม่ได้
+    if image_data:
+        image_summary = describe_image_for_retrieval(image_data, query)
+        query_for_search = f"{query}\n{image_summary}".strip() if query else image_summary
+    else:
+        query_for_search = query
+
+    search_query = rewrite_query_for_retrieval(query_for_search, history)
     candidates = hybrid_search(search_query, k=5)
     top_chunks, scores = rerank_with_scores(search_query, candidates, top_k=3)
     context = "\n".join([f"- {c}" for c in top_chunks])
@@ -281,13 +327,30 @@ def rag_answer(query, history=None):
         "- ตอบให้มั่นใจ ชัดเจน เป็นประโยชน์ที่สุดสำหรับผู้ถาม\n"
         "- ห้ามใส่ข้อความ disclaimer หรือคำเตือนทางกฎหมายท้ายคำตอบเอง เพราะมีข้อความนี้แสดงอยู่ใต้กล่องแชทบนหน้าเว็บอยู่แล้ว\n"
         "- ตอบเป็นภาษาไทย กระชับ เข้าใจง่ายสำหรับประชาชนทั่วไป\n"
-        "- ถ้าคำถามล่าสุดอ้างอิงถึงสิ่งที่คุยไว้ก่อนหน้าในบทสนทนานี้ ให้ใช้บริบทนั้นประกอบการตอบด้วย"
+        "- ถ้าคำถามล่าสุดอ้างอิงถึงสิ่งที่คุยไว้ก่อนหน้าในบทสนทนานี้ ให้ใช้บริบทนั้นประกอบการตอบด้วย\n"
+        "- ถ้ามีภาพแนบมาด้วย ให้ดูเนื้อหาในภาพประกอบการตอบโดยตรง ไม่ใช่แค่พึ่งข้อความสรุปที่ให้มา"
     )
 
-    current_turn_content = (
+    current_turn_text = (
         "ข้อมูลอ้างอิงที่อาจเกี่ยวข้อง (ใช้ประกอบถ้าตรงกับคำถาม):\n" + context + "\n\n"
-        "คำถาม: " + query
+        "คำถาม: " + (query if query else "(ผู้ใช้แนบภาพมาโดยไม่ได้พิมพ์คำถามเพิ่ม กรุณาดูภาพแล้วช่วยอธิบาย/ให้ความรู้ที่เกี่ยวข้อง)")
     )
+
+    # ถ้ามีภาพ: ส่งภาพจริงเข้าไปในเทิร์นล่าสุดด้วย (ไม่ใช่แค่ข้อความสรุป) ให้ Claude ตัวตอบจริงเห็นภาพตรงๆ
+    if image_data:
+        current_turn_content = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image_data["media_type"],
+                    "data": image_data["base64"],
+                },
+            },
+            {"type": "text", "text": current_turn_text},
+        ]
+    else:
+        current_turn_content = current_turn_text
 
     # ต่อประวัติสนทนาเดิม (ถ้ามี) เข้าเป็น multi-turn messages ก่อนคำถามล่าสุด
     # ใช้แค่ query ต้นฉบับ (ไม่ใช่ search_query ที่ rewrite แล้ว) เพราะนี่คือสิ่งที่ user พิมพ์จริง
@@ -315,15 +378,12 @@ def rag_answer(query, history=None):
 
     CONFIDENCE_THRESHOLD = 0.3
     if len(scores) == 0 or max(scores) < CONFIDENCE_THRESHOLD:
-        log_low_confidence_query(query, answer, top_chunks, max(scores) if scores else 0)
+        log_query_text = query if query else "(คำถามจากภาพแนบ ไม่มีข้อความ)"
+        log_low_confidence_query(log_query_text, answer, top_chunks, max(scores) if scores else 0)
 
     return answer, top_chunks
 
 # ---------- Pydantic Models (ต้องประกาศก่อนใช้งานด้านล่าง) ----------
-class Question(BaseModel):
-    query: str
-    chat_id: Optional[int] = None
-
 class LogAction(BaseModel):
     log_id: int
 
@@ -378,9 +438,38 @@ class UpdateUserRoleRequest(BaseModel):
 
 # ---------- User API ----------
 @app.post("/ask")
-def ask_question(question: Question, request: Request):
+async def ask_question(
+    request: Request,
+    query: str = Form(""),
+    chat_id: Optional[int] = Form(None),
+    image: Optional[UploadFile] = File(None),
+):
+    query = query.strip()
     user_id = get_active_user_id(request)
-    chat_id = question.chat_id
+
+    # ---------- จัดการภาพแนบ (ถ้ามี) — จำกัดเฉพาะ user ที่ login ----------
+    image_data = None
+    if image is not None:
+        if not user_id:
+            raise HTTPException(status_code=403, detail="กรุณาเข้าสู่ระบบก่อนใช้ฟีเจอร์แนบภาพ")
+
+        media_type = image.content_type
+        if media_type not in ALLOWED_IMAGE_TYPES:
+            raise HTTPException(status_code=400, detail="รองรับเฉพาะไฟล์ภาพ JPEG/PNG/WEBP/GIF เท่านั้น")
+
+        raw_bytes = await image.read()
+        if len(raw_bytes) > MAX_IMAGE_SIZE_BYTES:
+            raise HTTPException(status_code=400, detail="ไฟล์ภาพใหญ่เกินไป (จำกัดไม่เกิน 5MB)")
+        if len(raw_bytes) == 0:
+            raise HTTPException(status_code=400, detail="ไฟล์ภาพว่างเปล่า")
+
+        image_data = {
+            "media_type": media_type,
+            "base64": base64.b64encode(raw_bytes).decode("utf-8"),
+        }
+
+    if not query and image_data is None:
+        raise HTTPException(status_code=400, detail="กรุณาพิมพ์คำถามหรือแนบภาพอย่างน้อยหนึ่งอย่าง")
 
     # ดึงประวัติสนทนา "ก่อน" เรียก rag_answer เพราะต้องใช้ตอน rewrite query + ส่งเป็น multi-turn context
     # จำกัดเฉพาะ user ที่ login เท่านั้น (guest ไม่มี chat_id/ประวัติผูกกับ DB ให้ดึง)
@@ -391,15 +480,16 @@ def ask_question(question: Question, request: Request):
             raise HTTPException(status_code=404, detail="ไม่พบแชทนี้")
         history = get_chat_messages(chat_id)
 
-    answer, sources = rag_answer(question.query, history=history)
+    answer, sources = rag_answer(query, history=history, image_data=image_data)
 
-    if user_id:
+    # คำถามที่มีภาพแนบ: ไม่บันทึกลงประวัติแชทเลยตามที่ตัดสินใจไว้ (ถาม-ตอบแล้วหาย ไม่เก็บแม้แต่ข้อความสรุป)
+    if user_id and image_data is None:
         if chat_id is None:
             # ยังไม่มีแชทอยู่ (ผู้ใช้เพิ่งเริ่มถามคำถามแรก) — สร้างแชทใหม่ ตั้งชื่อจากคำถามแรก
-            title = question.query.strip()[:50] or "แชทใหม่"
+            title = query.strip()[:50] or "แชทใหม่"
             chat_id = create_chat_session(user_id, title=title)
 
-        add_chat_message(chat_id, "user", question.query)
+        add_chat_message(chat_id, "user", query)
         add_chat_message(chat_id, "assistant", answer)
         touch_chat_session(chat_id)
 
