@@ -41,6 +41,54 @@ function clearImageAttachment() {
 // =====================================================================
 // ถาม-ตอบหลัก
 // =====================================================================
+// =====================================================================
+// ขยายช่องพิมพ์เป็น popup กลางจอ — ตอนพิมพ์ยาวเกินกรอบ หรือคลิกกล่องที่มีข้อความยาวค้างอยู่
+// =====================================================================
+function checkAndExpandInput() {
+    const input = document.getElementById("questionInput");
+    // scrollWidth > clientWidth แปลว่าข้อความยาวเกินกว่าจะแสดงในกรอบได้หมด (ล้นกรอบ)
+    if (input.scrollWidth > input.clientWidth + 2) {
+        openInputExpandModal();
+    }
+}
+
+function handleQuestionInputChange() {
+    checkAndExpandInput();
+}
+
+function handleQuestionInputClick() {
+    checkAndExpandInput();
+}
+
+function openInputExpandModal() {
+    const currentText = document.getElementById("questionInput").value;
+    openModal(`
+        <textarea id="questionExpandTextarea" class="input-expand-textarea"
+                  placeholder="พิมพ์คำถามเกี่ยวกับกฎหมายที่ท่านสงสัย">${escapeHtml(currentText)}</textarea>
+        <div class="ask-controls">
+            <button type="button" onclick="document.getElementById('imageAttachInput').click()">แนบเอกสารทางกฎหมาย</button>
+            <button onclick="submitFromExpandModal()">ถาม</button>
+        </div>
+    `);
+
+    const textarea = document.getElementById("questionExpandTextarea");
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length); // เคอร์เซอร์ไปท้ายข้อความเดิม พิมพ์ต่อได้เลย
+
+    // sync ค่ากลับไปที่ input ตัวเดิมทุกครั้งที่พิมพ์ — เพื่อให้พอปิด popup แล้วข้อความยังอยู่ครบ
+    // (ปิด popup ไม่ได้ล้างข้อความทิ้ง กดกล่องเดิมใหม่เปิดกลับมาแก้ต่อได้)
+    textarea.addEventListener("input", () => {
+        document.getElementById("questionInput").value = textarea.value;
+    });
+}
+
+function submitFromExpandModal() {
+    const textarea = document.getElementById("questionExpandTextarea");
+    document.getElementById("questionInput").value = textarea.value;
+    closeModal();
+    askQuestion();
+}
+
 async function askQuestion() {
     const input = document.getElementById("questionInput");
     const query = input.value.trim();
@@ -95,6 +143,9 @@ function appendChatMessage(role, content) {
 
     if (role === "user") {
         wrapper.textContent = content;
+        wrapper.classList.add("truncatable"); // ตัด ... ถ้ายาวเกิน 1 บรรทัด กดเพื่อดูเต็มได้
+        wrapper.title = "คลิกเพื่อดูข้อความเต็ม";
+        wrapper.addEventListener("click", () => wrapper.classList.toggle("expanded"));
     } else {
         const rawHtml = marked.parse(content);
         wrapper.innerHTML = DOMPurify.sanitize(rawHtml);
