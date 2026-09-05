@@ -58,7 +58,12 @@
         <button type="button" onclick="clearImageAttachment()">✕</button>
     </div>
 
-    <div id="loading" style="display:none;">กำลังคิด...</div>
+    <div id="loading" class="top-loading-indicator" hidden>
+        <div class="spinner-dots">
+            <span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <span class="loading-text">กำลังคิดอยู่...</span>
+    </div>
     <div id="answerBox"></div>
 
     <p class="app-footnote">💡 เครื่องมือช่วยค้นหาความรู้กฎหมายเบื้องต้นเพื่อความสะดวกของท่าน สำหรับกรณีเฉพาะแนะนำปรึกษาทนายความหรือหน่วยงานราชการที่เกี่ยวข้องเพิ่มเติม</p>
