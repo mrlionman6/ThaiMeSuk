@@ -562,6 +562,12 @@ button {
     margin-top: 8px;
 }
 
+.confirm-dialog-message {
+    margin: 0 0 16px;
+    font-size: 15px;
+    line-height: 1.5;
+}
+
 .modal-buttons button {
     flex: 1;
     font-size: 14px;
