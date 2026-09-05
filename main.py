@@ -505,14 +505,20 @@ async def ask_question(
 
     answer, sources = rag_answer(query, history=history, image_data=image_data)
 
-    # คำถามที่มีภาพแนบ: ไม่บันทึกลงประวัติแชทเลยตามที่ตัดสินใจไว้ (ถาม-ตอบแล้วหาย ไม่เก็บแม้แต่ข้อความสรุป)
-    if user_id and image_data is None:
+    if user_id:
+        # ไม่เก็บภาพจริงลง DB เลย (กัน DB บวมจาก base64) แต่ยังเก็บข้อความคำถาม/คำตอบไว้ให้ดูย้อนได้เสมอ
+        # ถ้ามีภาพแนบมาด้วย ใส่ marker ให้รู้ตอนดูย้อนว่าเทิร์นนี้เคยมีภาพประกอบ (ตัวภาพเองไม่ได้ถูกเก็บไว้)
+        if image_data is not None:
+            saved_query = f"📎 [แนบภาพ] {query}".strip() if query else "📎 [แนบภาพ] (ไม่มีข้อความ)"
+        else:
+            saved_query = query
+
         if chat_id is None:
             # ยังไม่มีแชทอยู่ (ผู้ใช้เพิ่งเริ่มถามคำถามแรก) — สร้างแชทใหม่ ตั้งชื่อจากคำถามแรก
-            title = query.strip()[:50] or "แชทใหม่"
+            title = saved_query.strip()[:50] or "แชทใหม่"
             chat_id = create_chat_session(user_id, title=title)
 
-        add_chat_message(chat_id, "user", query)
+        add_chat_message(chat_id, "user", saved_query)
         add_chat_message(chat_id, "assistant", answer)
         touch_chat_session(chat_id)
 
