@@ -54,6 +54,34 @@ input {
     flex-shrink: 0;
 }
 
+#attachImageBtn {
+    padding: 10px 14px;
+    font-size: 18px;
+}
+
+.image-attach-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #f4f4f4;
+    border-radius: 6px;
+    padding: 6px 12px;
+    margin-top: 8px;
+    font-size: 13px;
+}
+
+.image-attach-preview button {
+    padding: 2px 8px;
+    font-size: 13px;
+    background: none;
+    border: none;
+    color: #888;
+}
+
+.image-attach-preview button:hover {
+    color: #c0392b;
+}
+
 button {
     padding: 10px 20px;
     font-size: 16px;
