@@ -45,7 +45,14 @@
 
     <div class="ask-row">
         <input type="text" id="questionInput" placeholder="พิมพ์คำถามเกี่ยวกับกฎหมายที่ท่านสงสัย">
+        <button type="button" id="attachImageBtn" onclick="document.getElementById('imageAttachInput').click()" title="แนบภาพ (ต้องเข้าสู่ระบบ)">📎</button>
+        <input type="file" id="imageAttachInput" accept="image/jpeg,image/png,image/webp,image/gif" hidden onchange="handleImageSelected()">
         <button onclick="askQuestion()">ถาม</button>
+    </div>
+
+    <div id="imageAttachPreview" class="image-attach-preview" hidden>
+        <span id="imageAttachName"></span>
+        <button type="button" onclick="clearImageAttachment()">✕</button>
     </div>
 
     <div id="loading" style="display:none;">กำลังคิด...</div>
