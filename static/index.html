@@ -48,7 +48,7 @@
                oninput="handleQuestionInputChange()" onclick="handleQuestionInputClick()">
         <div class="ask-controls">
             <button type="button" id="attachImageBtn" onclick="document.getElementById('imageAttachInput').click()" title="ต้องเข้าสู่ระบบก่อนใช้งาน">แนบเอกสารทางกฎหมาย</button>
-            <input type="file" id="imageAttachInput" accept="image/jpeg,image/png,image/webp,image/gif" hidden onchange="handleImageSelected()">
+            <input type="file" id="imageAttachInput" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf" hidden onchange="handleImageSelected()">
             <button onclick="askQuestion()">ถาม</button>
         </div>
     </div>
@@ -62,7 +62,7 @@
         <div class="spinner-dots">
             <span></span><span></span><span></span><span></span><span></span><span></span>
         </div>
-        <span class="loading-text">กำลังคิดอยู่...</span>
+        <span class="loading-text">รอสักครู่...</span>
     </div>
     <div id="answerBox"></div>
 
