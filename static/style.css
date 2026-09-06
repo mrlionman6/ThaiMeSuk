@@ -806,6 +806,13 @@ button {
     border-radius: 20px;
     padding: 8px 16px;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+    animation: loading-bob 1.8s ease-in-out infinite; /* เลื่อนขึ้นลงเบาๆ ease-in-out ตอนเปลี่ยนทิศทาง */
+}
+
+/* คง translateX(-50%) ไว้ทุก keyframe กันเสียตำแหน่งกึ่งกลางแนวนอน แค่ขยับแนวตั้งเพิ่ม */
+@keyframes loading-bob {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(-6px); }
 }
 
 .loading-text {
