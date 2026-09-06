@@ -22,9 +22,9 @@ function handleImageSelected() {
         return;
     }
 
-    const maxSizeBytes = 5 * 1024 * 1024; // ต้องตรงกับ MAX_IMAGE_SIZE_BYTES ฝั่ง backend
+    const maxSizeBytes = 10 * 1024 * 1024; // ต้องตรงกับ MAX_IMAGE_SIZE_BYTES ฝั่ง backend (ขยายเป็น 10MB รองรับ PDF)
     if (file.size > maxSizeBytes) {
-        alert("ไฟล์ภาพใหญ่เกินไป (จำกัดไม่เกิน 5MB)");
+        alert("ไฟล์ใหญ่เกินไป (จำกัดไม่เกิน 10MB)");
         imageInput.value = "";
         return;
     }
@@ -129,7 +129,7 @@ async function askQuestion() {
     if (imageFile) formData.append("image", imageFile);
 
     // โชว์คำถามทันทีถ้ายังอยู่แชทเดียวกับที่กำลังจะถาม (ควรเป็นเช่นนั้นเสมอตอนกดปุ่ม)
-    appendChatMessage("user", query || "📎 (ส่งภาพแนบมาโดยไม่มีข้อความ)");
+    appendChatMessage("user", query || "📎 (ส่งไฟล์แนบมาโดยไม่มีข้อความ)");
     input.value = "";
     clearImageAttachment();
     scrollChatToBottom();
@@ -149,20 +149,26 @@ async function askQuestion() {
         markChatPending(requestChatId, false);
         updateLoadingIndicator();
 
+        // เช็คไว้ก่อน "ก่อน" ที่จะไป sync currentChatId ด้านล่าง — กันบั๊กที่การ sync
+        // เปลี่ยนค่า currentChatId ไปแล้วทำให้เช็คซ้ำทีหลังผิดพลาด (เช่น null -> id จริงตอนแชทใหม่)
+        const stillSameChat = (currentChatId === requestChatId);
+
         if (currentUser && data.chat_id) {
-            if (currentChatId === requestChatId) {
-                currentChatId = data.chat_id; // แชทใหม่เพิ่งได้ id จริงตอนนี้
+            if (stillSameChat) {
+                currentChatId = data.chat_id; // แชทใหม่เพิ่งได้ id จริงตอนนี้ sync ให้ตรงก่อนโชว์ผล
             }
             loadChatHistory(); // อัปเดต sidebar เสมอ แม้ทำงานอยู่เบื้องหลัง (ไม่ได้ดูแชทนี้ตอนนี้)
         }
 
         // โชว์คำตอบแบบ "fake streaming" เฉพาะตอนยังอยู่แชทเดียวกับที่ถามไว้เท่านั้น
         // (คำตอบผ่านการเช็ค LanguageGuard มาครบแล้วตั้งแต่ backend ก่อนส่งมาถึงตรงนี้)
-        if (currentChatId === requestChatId) {
+        if (stillSameChat) {
             const wrapper = document.createElement("div");
             wrapper.className = "chat-msg chat-msg-assistant";
             document.getElementById("answerBox").appendChild(wrapper);
-            typewriterReveal(wrapper, data.answer, requestChatId);
+            // ใช้ currentChatId (ค่าล่าสุดหลัง sync ด้านบนแล้ว) ไม่ใช่ requestChatId เดิม
+            // เพราะถ้าเป็นแชทใหม่ requestChatId คือ null แต่ตอนนี้ currentChatId กลายเป็น id จริงแล้ว
+            typewriterReveal(wrapper, data.answer, currentChatId);
         }
         // ถ้าสลับไปแชทอื่นแล้ว ไม่ต้องโชว์อะไร (จะเห็นตอนกลับมาเปิดแชทนั้นผ่าน loadChat ที่ fetch จาก server)
 
