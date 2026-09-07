@@ -415,6 +415,34 @@ def add_knowledge_chunk(content: str, embedding: Optional[list[float]] = None) -
         return row.id
 
 
+def knowledge_chunk_exists(chunk_id: int) -> bool:
+    """เช็คว่ามี chunk ที่ id นี้อยู่แล้วหรือยัง — ใช้เช็คก่อน insert แบบระบุตำแหน่งเอง กันเผลอ insert ทับของเดิม"""
+    with SessionLocal() as session:
+        return session.get(KnowledgeBase, chunk_id) is not None
+
+
+def add_knowledge_chunk_at_id(chunk_id: int, content: str, embedding: Optional[list[float]] = None) -> bool:
+    """เพิ่ม chunk ใหม่ที่ id ที่ระบุตรงๆ (ใช้ตอนอยากเติมคืนตำแหน่งที่เคยลบไปโดยไม่ตั้งใจ)
+    คืนค่า False ถ้า id นี้มีอยู่แล้ว (caller ควรเช็ค knowledge_chunk_exists() ก่อนเรียกอยู่แล้ว แต่กันซ้ำอีกชั้น)
+    หลัง insert จะ sync ตัวนับ sequence ให้ id ถัดไปที่ auto-increment (ไม่ระบุ id เอง) ไม่ชนกับที่เพิ่งใส่มือไปตรงนี้"""
+    with SessionLocal() as session:
+        existing = session.get(KnowledgeBase, chunk_id)
+        if existing is not None:
+            return False
+        row = KnowledgeBase(id=chunk_id, content=content, embedding=embedding)
+        session.add(row)
+        session.commit()
+
+    # sync sequence โดยใช้ pg_get_serial_sequence() แทนเดาชื่อ sequence เอง (ปลอดภัยกว่า)
+    with engine.connect() as conn:
+        conn.execute(text(
+            "SELECT setval(pg_get_serial_sequence('knowledge_base', 'id'), "
+            "GREATEST((SELECT MAX(id) FROM knowledge_base), 1))"
+        ))
+        conn.commit()
+    return True
+
+
 def update_knowledge_chunk(chunk_id: int, content: str, embedding: Optional[list[float]] = None) -> bool:
     """แก้ไขเนื้อหา chunk ที่มีอยู่แล้ว — คืนค่า False ถ้าไม่เจอ id นี้
     ถ้าส่ง embedding มาด้วย จะอัปเดตพร้อมกัน (ควรส่งเสมอเมื่อ content เปลี่ยน เพราะ embedding เดิมจะไม่ตรงกับเนื้อหาใหม่แล้ว)"""
