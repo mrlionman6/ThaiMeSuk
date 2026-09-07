@@ -14,6 +14,8 @@ db.py — เลเยอร์เชื่อมต่อ PostgreSQL สำห�
         add_knowledge_chunk, update_knowledge_chunk, delete_knowledge_chunk,
         get_or_create_tag, set_tags_for_chunk, get_tags_for_chunk, get_all_tags,
         create_kb_snapshot, get_kb_snapshots, rollback_to_snapshot,
+        get_embeddings_for_chunks, create_agent_job, finish_agent_job, get_agent_jobs,
+        create_agent_proposal, get_agent_proposals, get_proposal_by_id, update_proposal_status,
         get_chunks_missing_embeddings, set_embedding, get_vector_scores_for_all,
         get_logs, get_logs_paginated, log_low_confidence_query, approve_log, reject_log,
         create_user, get_user_by_username, get_user_by_id, update_user_password,
@@ -82,6 +84,33 @@ class KbSnapshot(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
     label = Column(String, nullable=True)  # เหตุผล/ป้ายกำกับ เช่น "ก่อนรัน AI Agent ยุบรวม chunk"
     data = Column(JSON, nullable=False)  # {"chunks": [{"id":, "content":, "embedding":[...], "tags":[...]}, ...]}
+
+
+class AgentJob(Base):
+    """บันทึกประวัติการรัน AI Agent แต่ละครั้ง — ผูกกับ snapshot ที่สร้างไว้ก่อนรันเสมอ
+    เพื่อให้ rollback กลับไปก่อนงานนี้ได้ทันทีถ้าผลลัพธ์ไม่ดีหรือเกิด error ระหว่างทาง"""
+    __tablename__ = "agent_jobs"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    action_type = Column(String, nullable=False)  # "suggest_tags" | "merge_chunks"
+    mode = Column(String, nullable=False)  # "autonomous" | "review"
+    scope_summary = Column(String, nullable=True)  # คำอธิบาย scope ไว้ดูย้อนหลัง
+    pre_snapshot_id = Column(Integer, nullable=True)  # backup ที่สร้างไว้ก่อนรันงานนี้
+    status = Column(String, nullable=False, default="running")  # running | completed | awaiting_review | failed
+    result_summary = Column(JSON, nullable=True)  # สรุปผลลัพธ์ เช่น {"applied_count": 5} หรือ {"error": "..."}
+
+
+class AgentProposal(Base):
+    """ข้อเสนอจาก AI Agent ที่รอ admin ตรวจสอบ (โหมด review เท่านั้น) — แก้ไขได้ก่อน approve จริง"""
+    __tablename__ = "agent_proposals"
+
+    id = Column(Integer, primary_key=True)
+    job_id = Column(Integer, ForeignKey("agent_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    proposal_type = Column(String, nullable=False)  # "add_tags" | "merge"
+    payload = Column(JSON, nullable=False)
+    status = Column(String, nullable=False, default="pending")  # pending | approved | rejected
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
 
 
 class Log(Base):
@@ -507,6 +536,102 @@ def rollback_to_snapshot(snapshot_id: int) -> bool:
         conn.commit()
 
     return True
+
+
+# ---------- Agent Jobs & Proposals (ระยะ 3 — AI Agent) ----------
+
+def get_embeddings_for_chunks(chunk_ids: list[int]) -> list[Optional[list[float]]]:
+    """ดึง embedding ของหลาย chunk พร้อมกันตามลำดับ id ที่ส่งมา — คืน None สำหรับ chunk ที่ยังไม่มี embedding
+    ใช้ในการหา merge candidate ด้วยวิธี embedding prefilter"""
+    with SessionLocal() as session:
+        rows = (
+            session.query(KnowledgeBase.id, KnowledgeBase.embedding)
+            .filter(KnowledgeBase.id.in_(chunk_ids))
+            .all()
+        )
+        embedding_map = {r[0]: (list(r[1]) if r[1] is not None else None) for r in rows}
+        return [embedding_map.get(cid) for cid in chunk_ids]
+
+
+def create_agent_job(action_type: str, mode: str, scope_summary: str, pre_snapshot_id: int) -> int:
+    with SessionLocal() as session:
+        job = AgentJob(
+            action_type=action_type, mode=mode, scope_summary=scope_summary,
+            pre_snapshot_id=pre_snapshot_id, status="running",
+        )
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        return job.id
+
+
+def finish_agent_job(job_id: int, status: str, result_summary: dict):
+    with SessionLocal() as session:
+        job = session.get(AgentJob, job_id)
+        if job:
+            job.status = status
+            job.result_summary = result_summary
+            session.commit()
+
+
+def get_agent_jobs() -> list[dict]:
+    """คืนประวัติงาน agent ล่าสุด 20 รายการ เรียงใหม่สุดก่อน"""
+    with SessionLocal() as session:
+        rows = session.query(AgentJob).order_by(AgentJob.created_at.desc()).limit(20).all()
+        return [
+            {
+                "id": r.id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "action_type": r.action_type,
+                "mode": r.mode,
+                "scope_summary": r.scope_summary,
+                "pre_snapshot_id": r.pre_snapshot_id,
+                "status": r.status,
+                "result_summary": r.result_summary,
+            }
+            for r in rows
+        ]
+
+
+def create_agent_proposal(job_id: int, proposal_type: str, payload: dict) -> int:
+    with SessionLocal() as session:
+        p = AgentProposal(job_id=job_id, proposal_type=proposal_type, payload=payload, status="pending")
+        session.add(p)
+        session.commit()
+        session.refresh(p)
+        return p.id
+
+
+def get_agent_proposals(job_id: Optional[int] = None, status: str = "pending") -> list[dict]:
+    with SessionLocal() as session:
+        q = session.query(AgentProposal)
+        if job_id is not None:
+            q = q.filter(AgentProposal.job_id == job_id)
+        if status:
+            q = q.filter(AgentProposal.status == status)
+        rows = q.order_by(AgentProposal.id).all()
+        return [
+            {"id": r.id, "job_id": r.job_id, "proposal_type": r.proposal_type, "payload": r.payload, "status": r.status}
+            for r in rows
+        ]
+
+
+def get_proposal_by_id(proposal_id: int) -> Optional[dict]:
+    with SessionLocal() as session:
+        p = session.get(AgentProposal, proposal_id)
+        if p is None:
+            return None
+        return {"id": p.id, "job_id": p.job_id, "proposal_type": p.proposal_type, "payload": p.payload, "status": p.status}
+
+
+def update_proposal_status(proposal_id: int, status: str) -> bool:
+    with SessionLocal() as session:
+        p = session.get(AgentProposal, proposal_id)
+        if p is None:
+            return False
+        p.status = status
+        session.commit()
+        return True
 
 
 def add_knowledge_chunk(content: str, embedding: Optional[list[float]] = None) -> int:
