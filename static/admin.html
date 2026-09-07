@@ -37,6 +37,7 @@
                 <summary>➕ เพิ่ม chunk เดี่ยว</summary>
                 <div class="kb-toolbar-body">
                     <textarea id="newChunkText" class="kb-textarea" placeholder="พิมพ์เนื้อหาที่จะเพิ่มเข้า Knowledge Base"></textarea>
+                    <input type="text" id="newChunkTags" class="kb-tag-input" placeholder="Tag (คั่นด้วย , เช่น ภาษี, ที่ดิน) — ไม่บังคับ">
                     <button onclick="addSingleChunk()">เพิ่ม</button>
                     <span id="addChunkStatus" class="kb-toolbar-status"></span>
                 </div>
@@ -44,13 +45,21 @@
             <details class="kb-toolbar-section">
                 <summary>📁 Import จากไฟล์ (หลาย chunk พร้อมกัน)</summary>
                 <div class="kb-toolbar-body">
-                    <p class="ts-note">รองรับ .json (list ของข้อความ) หรือ .txt (หนึ่งบรรทัดต่อหนึ่ง chunk)</p>
+                    <p class="ts-note">รองรับ .json (list ของข้อความ หรือ dict {"content":"...","tags":["ภาษี"]} ถ้าอยากใส่ tag มาด้วย) หรือ .txt (หนึ่งบรรทัดต่อหนึ่ง chunk ไม่มี tag)</p>
                     <input type="file" id="bulkFileInput" accept=".json,.txt">
                     <button onclick="bulkImportChunks()">Import</button>
                     <span id="bulkImportStatus" class="kb-toolbar-status"></span>
                 </div>
             </details>
         </div>
+
+        <div class="kb-filter-bar">
+            <label class="kb-filter-label">กรองตาม tag:</label>
+            <div id="kbTagFilterList" class="kb-tag-filter-list">กำลังโหลด tag...</div>
+            <button type="button" onclick="clearKbTagFilter()" class="kb-filter-clear-btn">ล้างตัวกรอง</button>
+            <button type="button" onclick="exportKb()" class="kb-export-btn">📤 Export</button>
+        </div>
+
         <div id="kbContainer">กำลังโหลด...</div>
         <div id="kbPagination" class="pagination-bar"></div>
     </div>
