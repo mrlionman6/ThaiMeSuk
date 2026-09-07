@@ -1,5 +1,5 @@
 """
-db.py — เลเยอร์เชื่อมต่อ PostgreSQL สำหรับ ThaiMeSuk
+db.py — เลเยอร์เชื่อมต่อ PostgreSQL สำหรับ ThaiMeSook
 
 แทนที่การอ่าน/เขียน knowledge_base.json และ low_confidence_log.json ด้วยเดิม
 วาง require: sqlalchemy, psycopg2-binary, pgvector ใน requirements.txt
