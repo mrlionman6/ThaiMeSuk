@@ -147,6 +147,16 @@
                 <p class="scope-preview">📊 ตรงกับ <strong id="scopePreviewCount">-</strong> รายการ</p>
             </div>
         </details>
+        <!-- ส่วนที่ 4: Backup / Rollback — ต้องมีก่อนให้ AI Agent แตะข้อมูลจริงในระยะถัดไป -->
+        <details class="kb-toolbar-section">
+            <summary>💾 Backup & Rollback</summary>
+            <div class="kb-toolbar-body">
+                <p class="ts-note">เก็บ backup ล่าสุดไว้ 2 เวอร์ชัน (เวอร์ชันเก่าสุดถูกลบทิ้งอัตโนมัติเมื่อสร้างใหม่เกิน 2 อัน)</p>
+                <button onclick="createKbSnapshot()">📸 สร้าง Backup ตอนนี้</button>
+                <span id="snapshotCreateStatus" class="kb-toolbar-status"></span>
+                <div id="snapshotList" style="margin-top:12px;">กำลังโหลด...</div>
+            </div>
+        </details>
     </div>
 
     <script src="/static/admin.js"></script>
