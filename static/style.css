@@ -924,3 +924,67 @@ button {
     0%, 100% { opacity: 0.15; }
     50% { opacity: 1; }
 }
+
+/* ---------- Admin: แท็บจัดการ Tag ---------- */
+.tag-manager-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.tag-manager-row .kb-tag-input {
+    flex: 1;
+    margin-top: 0;
+}
+
+.tag-count-label {
+    font-size: 12px;
+    color: #888;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.tag-range-row {
+    display: flex;
+    gap: 8px;
+    margin: 6px 0;
+    flex-wrap: wrap;
+}
+
+.tag-range-row input[type="text"],
+.tag-range-row input[type="number"] {
+    flex: 1;
+    min-width: 100px;
+    padding: 6px 8px;
+    font-size: 13px;
+}
+
+.tag-range-row select {
+    flex: 1;
+    min-width: 140px;
+    padding: 6px 8px;
+    font-size: 13px;
+}
+
+.scope-option {
+    display: block;
+    font-size: 14px;
+    margin: 8px 0 4px;
+    cursor: pointer;
+}
+
+.scope-sub-option {
+    display: none; /* ซ่อนไว้ก่อน onScopeModeChange() จะสั่งโชว์เฉพาะอันที่ตรงกับโหมดที่เลือก */
+    margin-left: 24px;
+    margin-bottom: 8px;
+}
+
+.scope-preview {
+    margin-top: 14px;
+    padding: 8px 12px;
+    background: #eef2ff;
+    border-radius: 6px;
+    font-size: 14px;
+}
