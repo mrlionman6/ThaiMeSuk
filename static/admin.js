@@ -1,950 +1,216 @@
-// ---------- Tab switching ----------
-let currentTab = "pending"; // จำแท็บที่เปิดอยู่ตลอด session ของหน้า (ไม่ผูกกับ URL เพราะไม่ reload หน้า)
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - จัดการ Knowledge Base</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>🔧 Admin: จัดการระบบ
+        <a href="/admin/logout" style="font-size:14px; float:right;">🚪 Logout</a>
+    </h1>
 
-// ---------- Pagination state (แยกกันคนละแท็บ) ----------
-let pendingPage = 1;
-let pendingPageSize = 10;
+    <div class="tab-bar">
+        <button id="tabBtnPending" class="tab-btn tab-btn-active" onclick="switchTab('pending')">
+            📋 รอตรวจสอบ
+        </button>
+        <button id="tabBtnKb" class="tab-btn" onclick="switchTab('kb')">
+            📚 Knowledge Base
+        </button>
+        <button id="tabBtnUserRequests" class="tab-btn" onclick="switchTab('userRequests')">
+            🙋 คำขอสมัครสมาชิก
+        </button>
+        <button id="tabBtnUsers" class="tab-btn" onclick="switchTab('users')">
+            👥 จัดการบัญชี
+        </button>
+        <button id="tabBtnTags" class="tab-btn" onclick="switchTab('tags')">
+            🏷️ จัดการ Tag
+        </button>
+    </div>
 
-let kbPage = 1;
-let kbPageSize = 10;
-let kbSelectedTagIds = new Set(); // เก็บ tag id ที่กำลังกรองอยู่ (เลือกได้หลายอัน พร้อมกัน = OR)
+    <div id="tabPending" class="tab-panel">
+        <div id="logsContainer">กำลังโหลด...</div>
+        <div id="logsPagination" class="pagination-bar"></div>
+    </div>
 
-let userRequestsPage = 1;
-let userRequestsPageSize = 10;
-
-let usersPage = 1;
-let usersPageSize = 10;
-
-const PAGE_SIZE_OPTIONS = [10, 20, 50];
-const ROLE_LABELS = { 1: "ระดับ 1", 2: "ระดับ 2", 3: "ระดับ 3" };
-
-function switchTab(tab) {
-    currentTab = tab;
-
-    document.getElementById("tabPending").style.display = tab === "pending" ? "block" : "none";
-    document.getElementById("tabKb").style.display = tab === "kb" ? "block" : "none";
-    document.getElementById("tabUserRequests").style.display = tab === "userRequests" ? "block" : "none";
-    document.getElementById("tabUsers").style.display = tab === "users" ? "block" : "none";
-    document.getElementById("tabTags").style.display = tab === "tags" ? "block" : "none";
-
-    document.getElementById("tabBtnPending").classList.toggle("tab-btn-active", tab === "pending");
-    document.getElementById("tabBtnKb").classList.toggle("tab-btn-active", tab === "kb");
-    document.getElementById("tabBtnUserRequests").classList.toggle("tab-btn-active", tab === "userRequests");
-    document.getElementById("tabBtnUsers").classList.toggle("tab-btn-active", tab === "users");
-    document.getElementById("tabBtnTags").classList.toggle("tab-btn-active", tab === "tags");
-
-    if (tab === "pending") {
-        loadLogs(pendingPage);
-    } else if (tab === "kb") {
-        loadKb(kbPage);
-        loadKbTagFilterList();
-    } else if (tab === "userRequests") {
-        loadUserRequests(userRequestsPage);
-    } else if (tab === "users") {
-        loadUsers(usersPage);
-    } else if (tab === "tags") {
-        loadTagManagerList();
-        loadIdRangeHint();
-        loadScopeTagList();
-        updateScopePreview();
-        loadSnapshotList();
-    }
-}
-
-// ---------- แท็บ 1: คำถามรอตรวจสอบ ----------
-async function loadLogs(page = 1) {
-    pendingPage = page;
-    const container = document.getElementById("logsContainer");
-    try {
-        const response = await fetch(`/admin/api/logs?page=${page}&page_size=${pendingPageSize}`);
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        const data = await response.json();
-
-        renderPagination("logsPagination", data.total, page, pendingPageSize, (newPage) => loadLogs(newPage), (newSize) => {
-            pendingPageSize = newSize;
-            loadLogs(1);
-        });
-
-        if (data.logs.length === 0) {
-            container.innerHTML = page === 1
-                ? "<p>ไม่มีรายการรอตรวจสอบ 🎉</p>"
-                : "<p>ไม่มีรายการในหน้านี้</p>";
-            return;
-        }
-
-        container.innerHTML = "";
-        data.logs.forEach(log => {
-            const div = document.createElement("div");
-            div.className = "card";
-            div.id = "log-" + log.id;
-            div.innerHTML = `
-                <p><strong>คำถาม:</strong> ${escapeHtml(log.query)}</p>
-                <p><strong>คำตอบที่ Claude ตอบ:</strong> ${escapeHtml(log.answer)}</p>
-                <p><strong>คะแนนความมั่นใจ:</strong> ${log.max_score.toFixed(3)}</p>
-                <button onclick="approveLog(${log.id})">✅ เพิ่มเข้า Knowledge Base</button>
-                <button onclick="rejectLog(${log.id})">❌ ทิ้งไป</button>
-            `;
-            container.appendChild(div);
-        });
-    } catch (error) {
-        container.innerHTML = "<p style='color:red;'>โหลดรายการไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
-    }
-}
-
-async function approveLog(id) {
-    removeCardOptimistically("log-" + id); // ลบการ์ดออกจากจอทันที ไม่ต้องรอ backend ตอบ
-    try {
-        const res = await fetch("/admin/api/approve", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ log_id: id })
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-    } catch (error) {
-        alert("เพิ่มเข้า Knowledge Base ไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
-    } finally {
-        loadLogs(pendingPage); // ซิงก์กับ backend เสมอ อยู่หน้าเดิม
-    }
-}
-
-async function rejectLog(id) {
-    removeCardOptimistically("log-" + id);
-    try {
-        const res = await fetch("/admin/api/reject", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ log_id: id })
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-    } catch (error) {
-        alert("ทิ้งรายการไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
-    } finally {
-        loadLogs(pendingPage);
-    }
-}
-
-// ---------- แท็บ 2: จัดการ Knowledge Base ----------
-async function loadKb(page = 1) {
-    kbPage = page;
-    const container = document.getElementById("kbContainer");
-    try {
-        const tagIdsParam = kbSelectedTagIds.size > 0 ? Array.from(kbSelectedTagIds).join(",") : "";
-        const response = await fetch(`/admin/api/kb?page=${page}&page_size=${kbPageSize}&tag_ids=${tagIdsParam}`);
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        const data = await response.json();
-
-        renderPagination("kbPagination", data.total, page, kbPageSize, (newPage) => loadKb(newPage), (newSize) => {
-            kbPageSize = newSize;
-            loadKb(1);
-        });
-
-        if (data.chunks.length === 0) {
-            container.innerHTML = page === 1
-                ? "<p>ไม่มีข้อมูลตรงกับตัวกรองนี้</p>"
-                : "<p>ไม่มีรายการในหน้านี้</p>";
-            return;
-        }
-
-        container.innerHTML = `<p style="color:#666; font-size:14px;">ทั้งหมด ${data.total} รายการ</p>`;
-        data.chunks.forEach(chunk => {
-            const div = document.createElement("div");
-            div.className = "card";
-            div.id = "kb-" + chunk.id;
-            const tagsValue = (chunk.tags || []).join(", ");
-            const tagBadges = (chunk.tags || []).map(t => `<span class="kb-tag-badge">${escapeHtml(t)}</span>`).join(" ");
-            div.innerHTML = `
-                <p style="color:#888; font-size:12px; margin-bottom:4px;">#${chunk.id} ${tagBadges}</p>
-                <textarea id="kb-textarea-${chunk.id}" class="kb-textarea">${escapeHtml(chunk.content)}</textarea>
-                <input type="text" id="kb-tags-${chunk.id}" class="kb-tag-input" value="${escapeHtml(tagsValue)}" placeholder="Tag (คั่นด้วย ,)">
-                <div style="margin-top:8px;">
-                    <button onclick="saveKb(${chunk.id})">💾 บันทึก</button>
-                    <button onclick="deleteKb(${chunk.id})">🗑️ ลบ</button>
+    <div id="tabKb" class="tab-panel" style="display:none;">
+        <div class="kb-toolbar">
+            <details class="kb-toolbar-section">
+                <summary>➕ เพิ่ม chunk เดี่ยว</summary>
+                <div class="kb-toolbar-body">
+                    <textarea id="newChunkText" class="kb-textarea" placeholder="พิมพ์เนื้อหาที่จะเพิ่มเข้า Knowledge Base"></textarea>
+                    <input type="text" id="newChunkTags" class="kb-tag-input" placeholder="Tag (คั่นด้วย , เช่น ภาษี, ที่ดิน) — ไม่บังคับ">
+                    <input type="number" id="newChunkId" class="kb-tag-input" placeholder="ID ตำแหน่งที่ต้องการ (ไม่กรอก = ต่อท้ายอัตโนมัติ)">
+                    <button onclick="addSingleChunk()">เพิ่ม</button>
+                    <span id="addChunkStatus" class="kb-toolbar-status"></span>
                 </div>
-            `;
-            container.appendChild(div);
-        });
-    } catch (error) {
-        container.innerHTML = "<p style='color:red;'>โหลด Knowledge Base ไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
-    }
-}
-
-// ---------- ตัวกรอง tag ----------
-async function loadKbTagFilterList() {
-    const listEl = document.getElementById("kbTagFilterList");
-    try {
-        const res = await fetch("/admin/api/tags");
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-
-        if (data.tags.length === 0) {
-            listEl.innerHTML = '<span class="kb-filter-empty">ยังไม่มี tag ในระบบ</span>';
-            return;
-        }
-
-        listEl.innerHTML = "";
-        data.tags.forEach(tag => {
-            const chip = document.createElement("span");
-            chip.className = "kb-tag-filter-chip" + (kbSelectedTagIds.has(tag.id) ? " active" : "");
-            chip.textContent = `${tag.name} (${tag.count})`;
-            chip.onclick = () => toggleKbTagFilter(tag.id);
-            listEl.appendChild(chip);
-        });
-    } catch (error) {
-        listEl.innerHTML = '<span class="kb-filter-empty">โหลด tag ไม่สำเร็จ</span>';
-    }
-}
-
-function toggleKbTagFilter(tagId) {
-    if (kbSelectedTagIds.has(tagId)) {
-        kbSelectedTagIds.delete(tagId);
-    } else {
-        kbSelectedTagIds.add(tagId);
-    }
-    loadKbTagFilterList(); // อัปเดต highlight chip ที่เลือกอยู่
-    loadKb(1); // กรองใหม่ กลับไปหน้า 1 เสมอ
-}
-
-function clearKbTagFilter() {
-    kbSelectedTagIds.clear();
-    loadKbTagFilterList();
-    loadKb(1);
-}
-
-function exportKb() {
-    const tagIdsParam = kbSelectedTagIds.size > 0 ? Array.from(kbSelectedTagIds).join(",") : "";
-    // เปิด URL ตรงๆ ให้ browser จัดการดาวน์โหลดเอง (endpoint ส่ง Content-Disposition: attachment มาแล้ว)
-    window.location.href = `/admin/api/kb/export?tag_ids=${tagIdsParam}`;
-}
-
-// ---------- เพิ่ม chunk เดี่ยว ----------
-async function addSingleChunk() {
-    const textarea = document.getElementById("newChunkText");
-    const tagsInput = document.getElementById("newChunkTags");
-    const idInput = document.getElementById("newChunkId");
-    const statusEl = document.getElementById("addChunkStatus");
-    const content = textarea.value.trim();
-
-    if (!content) {
-        statusEl.textContent = "พิมพ์เนื้อหาก่อนกดเพิ่ม";
-        statusEl.style.color = "red";
-        return;
-    }
-
-    const tags = tagsInput.value.split(",").map(t => t.trim()).filter(t => t);
-    const idValue = idInput.value.trim();
-    const chunkId = idValue ? parseInt(idValue, 10) : null;
-
-    statusEl.textContent = "กำลังเพิ่ม...";
-    statusEl.style.color = "#666";
-
-    try {
-        const res = await fetch("/admin/api/kb", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content, tags, chunk_id: chunkId })
-        });
-        const data = await res.json();
-
-        if (res.status === 409) {
-            // id ที่ระบุชนกับ chunk ที่มีอยู่แล้ว — popup เตือนชัดเจนแยกจาก error ทั่วไป
-            alert("⚠️ " + data.detail);
-            statusEl.textContent = "";
-            return;
-        }
-        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
-
-        textarea.value = "";
-        tagsInput.value = "";
-        idInput.value = "";
-        statusEl.textContent = `✅ เพิ่มแล้ว (#${data.id})`;
-        statusEl.style.color = "green";
-        loadKb(1); // chunk ใหม่ id สูงสุด ไปโผล่หน้าสุดท้ายปกติ แต่กลับไปหน้า 1 ให้เห็นผลชัดเจนว่าเพิ่มสำเร็จ
-        loadKbTagFilterList(); // เผื่อมี tag ใหม่เกิดขึ้น ให้ขึ้นในตัวกรองด้วย
-    } catch (error) {
-        statusEl.textContent = "❌ เพิ่มไม่สำเร็จ: " + error;
-        statusEl.style.color = "red";
-    }
-}
-
-// ---------- Import หลาย chunk จากไฟล์ ----------
-async function bulkImportChunks() {
-    const fileInput = document.getElementById("bulkFileInput");
-    const statusEl = document.getElementById("bulkImportStatus");
-
-    if (!fileInput.files || fileInput.files.length === 0) {
-        statusEl.textContent = "เลือกไฟล์ก่อน";
-        statusEl.style.color = "red";
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append("file", fileInput.files[0]);
-
-    statusEl.textContent = "กำลัง import... (อาจใช้เวลาสักครู่ถ้าไฟล์ใหญ่)";
-    statusEl.style.color = "#666";
-
-    try {
-        const res = await fetch("/admin/api/kb/bulk", {
-            method: "POST",
-            body: formData
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
-
-        fileInput.value = "";
-        statusEl.textContent = `✅ import สำเร็จ ${data.count} chunk`;
-        statusEl.style.color = "green";
-        loadKb(1);
-    } catch (error) {
-        statusEl.textContent = "❌ import ไม่สำเร็จ: " + error;
-        statusEl.style.color = "red";
-    }
-}
-
-async function saveKb(id) {
-    const textarea = document.getElementById("kb-textarea-" + id);
-    const tagsInput = document.getElementById("kb-tags-" + id);
-    const newContent = textarea.value;
-    const tags = tagsInput.value.split(",").map(t => t.trim()).filter(t => t);
-    const btn = event.target;
-    btn.disabled = true;
-    btn.textContent = "กำลังบันทึก...";
-
-    try {
-        const res = await fetch("/admin/api/kb/" + id, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: newContent, tags })
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        btn.textContent = "✅ บันทึกแล้ว";
-        setTimeout(() => {
-            btn.textContent = "💾 บันทึก";
-            btn.disabled = false;
-            loadKbTagFilterList(); // เผื่อมี tag ใหม่/เปลี่ยนจำนวน ให้ตัวกรองอัปเดตตาม
-        }, 1200);
-    } catch (error) {
-        alert("บันทึกไม่สำเร็จ: " + error);
-        btn.textContent = "💾 บันทึก";
-        btn.disabled = false;
-    }
-}
-
-async function deleteKb(id) {
-    // โชว์เนื้อหาจริงในข้อความเตือน ไม่ใช่แค่ "ยืนยันลบ?" เฉยๆ — กันอุบัติเหตุกดลบผิดตัวโดยไม่ทันเห็นว่าลบอะไรไป
-    const textarea = document.getElementById("kb-textarea-" + id);
-    const fullText = textarea ? textarea.value : "";
-    const preview = fullText.slice(0, 150) + (fullText.length > 150 ? "..." : "");
-
-    const confirmed = confirm(
-        `⚠️ ยืนยันลบ chunk #${id} นี้ออกจาก Knowledge Base ถาวร?\n\n` +
-        `เนื้อหา: "${preview}"\n\n` +
-        `การกระทำนี้ย้อนกลับไม่ได้ทันที (กู้คืนได้เฉพาะจาก backup เท่านั้น)`
-    );
-    if (!confirmed) return;
-
-    removeCardOptimistically("kb-" + id);
-    try {
-        const res = await fetch("/admin/api/kb/" + id, { method: "DELETE" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-    } catch (error) {
-        alert("ลบไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
-    } finally {
-        loadKb(kbPage); // อยู่หน้าเดิม (ถ้าหน้านี้ว่างเปล่าไปหลังลบ ผู้ใช้กด "ก่อนหน้า" เองได้)
-    }
-}
-
-// ---------- แท็บ 3: คำขอสมัครสมาชิก ----------
-async function loadUserRequests(page = 1) {
-    userRequestsPage = page;
-    const container = document.getElementById("userRequestsContainer");
-    try {
-        const response = await fetch(`/admin/api/user-requests?page=${page}&page_size=${userRequestsPageSize}`);
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        const data = await response.json();
-
-        renderPagination("userRequestsPagination", data.total, page, userRequestsPageSize,
-            (newPage) => loadUserRequests(newPage),
-            (newSize) => { userRequestsPageSize = newSize; loadUserRequests(1); });
-
-        if (data.requests.length === 0) {
-            container.innerHTML = page === 1
-                ? "<p>ไม่มีคำขอสมัครสมาชิกรอตรวจสอบ 🎉</p>"
-                : "<p>ไม่มีรายการในหน้านี้</p>";
-            return;
-        }
-
-        container.innerHTML = "";
-        data.requests.forEach(req => {
-            const roleOptions = [1, 2, 3].map(r =>
-                `<option value="${r}" ${r === req.requested_role ? "selected" : ""}>${ROLE_LABELS[r]}</option>`
-            ).join("");
-
-            const div = document.createElement("div");
-            div.className = "card";
-            div.id = "userreq-" + req.id;
-            div.innerHTML = `
-                <p><strong>ชื่อผู้ใช้:</strong> ${escapeHtml(req.username)}</p>
-                <p><strong>ชื่อเล่น:</strong> ${escapeHtml(req.nickname || "-")}</p>
-                <p><strong>ขอสิทธิ์ระดับ:</strong> ${ROLE_LABELS[req.requested_role] || req.requested_role}</p>
-                <p style="color:#888; font-size:12px;">สมัครเมื่อ: ${req.created_at ? new Date(req.created_at).toLocaleString("th-TH") : "-"}</p>
-                <div style="margin-top:8px;">
-                    <label style="font-size:13px;">อนุมัติให้สิทธิ์ระดับ:
-                        <select id="grant-role-${req.id}">${roleOptions}</select>
-                    </label>
+            </details>
+            <details class="kb-toolbar-section">
+                <summary>📁 Import จากไฟล์ (หลาย chunk พร้อมกัน)</summary>
+                <div class="kb-toolbar-body">
+                    <p class="ts-note">รองรับ .json (list ของข้อความ หรือ dict {"content":"...","tags":["ภาษี"]} ถ้าอยากใส่ tag มาด้วย) หรือ .txt (หนึ่งบรรทัดต่อหนึ่ง chunk ไม่มี tag)</p>
+                    <input type="file" id="bulkFileInput" accept=".json,.txt">
+                    <button onclick="bulkImportChunks()">Import</button>
+                    <span id="bulkImportStatus" class="kb-toolbar-status"></span>
                 </div>
-                <div style="margin-top:8px;">
-                    <button onclick="approveUserRequest(${req.id})">✅ อนุมัติ</button>
-                    <button onclick="rejectUserRequest(${req.id})">❌ ปฏิเสธ</button>
-                </div>
-            `;
-            container.appendChild(div);
-        });
-    } catch (error) {
-        container.innerHTML = "<p style='color:red;'>โหลดรายการไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
-    }
-}
-
-async function approveUserRequest(userId) {
-    const select = document.getElementById("grant-role-" + userId);
-    const grantedRole = parseInt(select.value, 10);
-
-    removeCardOptimistically("userreq-" + userId);
-    try {
-        const res = await fetch(`/admin/api/user-requests/${userId}/approve`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ granted_role: grantedRole })
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-    } catch (error) {
-        alert("อนุมัติไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
-    } finally {
-        loadUserRequests(userRequestsPage);
-    }
-}
-
-async function rejectUserRequest(userId) {
-    removeCardOptimistically("userreq-" + userId);
-    try {
-        const res = await fetch(`/admin/api/user-requests/${userId}/reject`, { method: "POST" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-    } catch (error) {
-        alert("ปฏิเสธไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
-    } finally {
-        loadUserRequests(userRequestsPage);
-    }
-}
-
-// ---------- แท็บ 4: จัดการบัญชีที่อนุมัติแล้ว ----------
-async function loadUsers(page = 1) {
-    usersPage = page;
-    const container = document.getElementById("usersContainer");
-    try {
-        const response = await fetch(`/admin/api/users?page=${page}&page_size=${usersPageSize}`);
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        const data = await response.json();
-
-        renderPagination("usersPagination", data.total, page, usersPageSize,
-            (newPage) => loadUsers(newPage),
-            (newSize) => { usersPageSize = newSize; loadUsers(1); });
-
-        if (data.users.length === 0) {
-            container.innerHTML = page === 1
-                ? "<p>ยังไม่มีบัญชีที่อนุมัติแล้ว</p>"
-                : "<p>ไม่มีรายการในหน้านี้</p>";
-            return;
-        }
-
-        container.innerHTML = `<p style="color:#666; font-size:14px;">ทั้งหมด ${data.total} บัญชี</p>`;
-        data.users.forEach(u => {
-            const roleOptions = [1, 2, 3].map(r =>
-                `<option value="${r}" ${r === u.role ? "selected" : ""}>${ROLE_LABELS[r]}</option>`
-            ).join("");
-
-            const isBlocked = u.status === "blocked";
-            const statusBadge = isBlocked
-                ? `<span class="status-badge status-badge-blocked">🚫 ถูกระงับ</span>`
-                : `<span class="status-badge status-badge-active">✅ ใช้งานได้ปกติ</span>`;
-            const blockButtonHtml = isBlocked
-                ? `<button onclick="unblockUser(${u.id})">🔓 ปลดระงับ</button>`
-                : `<button onclick="blockUser(${u.id})">🔒 ระงับการใช้งาน</button>`;
-
-            const div = document.createElement("div");
-            div.className = "card";
-            div.id = "user-" + u.id;
-            div.innerHTML = `
-                <p><strong>ชื่อผู้ใช้:</strong> ${escapeHtml(u.username)} ${statusBadge}</p>
-                <p><strong>ชื่อเล่น:</strong> ${escapeHtml(u.nickname || "-")}</p>
-                <p style="color:#888; font-size:12px;">สมัครเมื่อ: ${u.created_at ? new Date(u.created_at).toLocaleString("th-TH") : "-"}</p>
-                <div style="margin-top:8px;">
-                    <label style="font-size:13px;">สิทธิ์ปัจจุบัน:
-                        <select id="user-role-${u.id}">${roleOptions}</select>
-                    </label>
-                    <button onclick="saveUserRole(${u.id})">💾 บันทึก</button>
-                </div>
-                <div style="margin-top:8px;">
-                    ${blockButtonHtml}
-                    <button onclick="deleteUser(${u.id})" class="danger-btn">🗑️ ลบบัญชี</button>
-                </div>
-            `;
-            container.appendChild(div);
-        });
-    } catch (error) {
-        container.innerHTML = "<p style='color:red;'>โหลดรายการไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
-    }
-}
-
-async function saveUserRole(userId) {
-    const select = document.getElementById("user-role-" + userId);
-    const role = parseInt(select.value, 10);
-    const btn = event.target;
-    btn.disabled = true;
-    btn.textContent = "กำลังบันทึก...";
-
-    try {
-        const res = await fetch(`/admin/api/users/${userId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ role })
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        btn.textContent = "✅ บันทึกแล้ว";
-        setTimeout(() => { btn.textContent = "💾 บันทึก"; btn.disabled = false; }, 1200);
-    } catch (error) {
-        alert("บันทึกไม่สำเร็จ: " + error);
-        btn.textContent = "💾 บันทึก";
-        btn.disabled = false;
-    }
-}
-
-async function blockUser(userId) {
-    if (!confirm("ระงับการใช้งานบัญชีนี้? ผู้ใช้จะถูกบังคับ logout จากทุกอุปกรณ์ทันที")) return;
-    try {
-        const res = await fetch(`/admin/api/users/${userId}/block`, { method: "POST" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-    } catch (error) {
-        alert("ระงับการใช้งานไม่สำเร็จ: " + error);
-    } finally {
-        loadUsers(usersPage);
-    }
-}
-
-async function unblockUser(userId) {
-    try {
-        const res = await fetch(`/admin/api/users/${userId}/unblock`, { method: "POST" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-    } catch (error) {
-        alert("ปลดระงับไม่สำเร็จ: " + error);
-    } finally {
-        loadUsers(usersPage);
-    }
-}
-
-async function deleteUser(userId) {
-    if (!confirm("ลบบัญชีนี้ถาวร? ข้อมูลทั้งหมด (ประวัติแชท คำถามกันลืมรหัสผ่าน) จะหายและกู้คืนไม่ได้")) return;
-
-    removeCardOptimistically("user-" + userId);
-    try {
-        const res = await fetch(`/admin/api/users/${userId}`, { method: "DELETE" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-    } catch (error) {
-        alert("ลบไม่สำเร็จ: " + error + " — กำลังโหลดรายการใหม่");
-    } finally {
-        loadUsers(usersPage);
-    }
-}
-
-// ---------- Pagination UI (ใช้ร่วมกันทุกแท็บ) ----------
-function renderPagination(containerId, total, currentPage, pageSize, onPageChange, onPageSizeChange) {
-    const el = document.getElementById(containerId);
-    const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
-    if (total === 0) {
-        el.innerHTML = "";
-        return;
-    }
-
-    const sizeOptions = PAGE_SIZE_OPTIONS.map(size =>
-        `<option value="${size}" ${size === pageSize ? "selected" : ""}>${size} รายการ/หน้า</option>`
-    ).join("");
-
-    el.innerHTML = `
-        <div class="pagination-controls">
-            <span class="pagination-info">ทั้งหมด ${total} รายการ — หน้า ${currentPage}/${totalPages}</span>
-            <div class="pagination-buttons">
-                <button ${currentPage <= 1 ? "disabled" : ""} id="${containerId}-prev">← ก่อนหน้า</button>
-                <button ${currentPage >= totalPages ? "disabled" : ""} id="${containerId}-next">ถัดไป →</button>
-                <select id="${containerId}-size">${sizeOptions}</select>
-            </div>
+            </details>
         </div>
-    `;
 
-    document.getElementById(containerId + "-prev").onclick = () => {
-        if (currentPage > 1) onPageChange(currentPage - 1);
-    };
-    document.getElementById(containerId + "-next").onclick = () => {
-        if (currentPage < totalPages) onPageChange(currentPage + 1);
-    };
-    document.getElementById(containerId + "-size").onchange = (e) => {
-        onPageSizeChange(parseInt(e.target.value, 10));
-    };
-}
+        <div class="kb-filter-bar">
+            <label class="kb-filter-label">กรองตาม tag:</label>
+            <div id="kbTagFilterList" class="kb-tag-filter-list">กำลังโหลด tag...</div>
+            <button type="button" onclick="clearKbTagFilter()" class="kb-filter-clear-btn">ล้างตัวกรอง</button>
+            <button type="button" onclick="exportKb()" class="kb-export-btn">📤 Export</button>
+        </div>
 
-// ---------- Helpers ----------
-function removeCardOptimistically(elementId) {
-    const el = document.getElementById(elementId);
-    if (el) el.remove();
-}
+        <div id="kbContainer">กำลังโหลด...</div>
+        <div id="kbPagination" class="pagination-bar"></div>
+    </div>
 
-function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
-}
+    <div id="tabUserRequests" class="tab-panel" style="display:none;">
+        <div id="userRequestsContainer">กำลังโหลด...</div>
+        <div id="userRequestsPagination" class="pagination-bar"></div>
+    </div>
 
-// ---------- แท็บ 5: จัดการ Tag ----------
-async function loadTagManagerList() {
-    const container = document.getElementById("tagManagerList");
-    try {
-        const res = await fetch("/admin/api/tags");
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
+    <div id="tabUsers" class="tab-panel" style="display:none;">
+        <div id="usersContainer">กำลังโหลด...</div>
+        <div id="usersPagination" class="pagination-bar"></div>
+    </div>
 
-        if (data.tags.length === 0) {
-            container.innerHTML = "<p>ยังไม่มี tag ในระบบ — เพิ่มได้จากแท็บ Knowledge Base หรือช่องด้านล่าง</p>";
-            return;
-        }
+    <div id="tabTags" class="tab-panel" style="display:none;">
 
-        container.innerHTML = "";
-        data.tags.forEach(tag => {
-            const row = document.createElement("div");
-            row.className = "tag-manager-row";
-            row.id = "tag-row-" + tag.id;
-            row.innerHTML = `
-                <input type="text" id="tag-name-${tag.id}" value="${escapeHtml(tag.name)}" class="kb-tag-input">
-                <span class="tag-count-label">${tag.count} chunk</span>
-                <button onclick="saveTagRename(${tag.id})">💾 บันทึกชื่อ</button>
-                <button onclick="deleteTagEntirely(${tag.id})" class="danger-btn">🗑️ ลบทั้งหมด</button>
-            `;
-            container.appendChild(row);
-        });
-    } catch (error) {
-        container.innerHTML = "<p style='color:red;'>โหลด tag ไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
-    }
-}
+        <!-- ส่วนที่ 1: รายการ tag ทั้งหมด แก้ชื่อ/ลบทั้งหมดได้ -->
+        <details class="kb-toolbar-section" open>
+            <summary>🏷️ Tag ทั้งหมดในระบบ</summary>
+            <div class="kb-toolbar-body">
+                <div id="tagManagerList">กำลังโหลด...</div>
+            </div>
+        </details>
 
-async function saveTagRename(tagId) {
-    const input = document.getElementById("tag-name-" + tagId);
-    const newName = input.value.trim();
-    if (!newName) {
-        alert("ชื่อ tag ห้ามว่างเปล่า");
-        return;
-    }
+        <!-- ส่วนที่ 2: เพิ่ม/ลบ tag ตามช่วง id -->
+        <details class="kb-toolbar-section">
+            <summary>➕➖ เพิ่ม/ลบ Tag ตามช่วง ID</summary>
+            <div class="kb-toolbar-body">
+                <p class="ts-note" id="idRangeHint">กำลังเช็คช่วง id ปัจจุบัน...</p>
 
-    try {
-        const res = await fetch(`/admin/api/tags/${tagId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: newName })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
-
-        loadTagManagerList();
-        loadKbTagFilterList(); // sync กับตัวกรองในแท็บ KB ด้วย
-        loadScopeTagList();    // sync กับ scope filter ในแท็บนี้ด้วย
-    } catch (error) {
-        alert("เปลี่ยนชื่อไม่สำเร็จ: " + error);
-    }
-}
-
-async function deleteTagEntirely(tagId) {
-    if (!confirm("ลบ tag นี้ออกจากทุก chunk ทั้งหมดในระบบถาวร? (ตัว chunk เองไม่หาย แค่ tag นี้จะหายไปจากทุกที่)")) return;
-
-    try {
-        const res = await fetch(`/admin/api/tags/${tagId}`, { method: "DELETE" });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        loadTagManagerList();
-        loadKbTagFilterList();
-        loadScopeTagList();
-    } catch (error) {
-        alert("ลบไม่สำเร็จ: " + error);
-    }
-}
-
-async function loadIdRangeHint() {
-    const hintEl = document.getElementById("idRangeHint");
-    try {
-        const res = await fetch("/admin/api/kb/id-range");
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        if (data.min_id === null) {
-            hintEl.textContent = "Knowledge Base ยังว่างเปล่า ไม่มี id ให้ระบุช่วง";
-        } else {
-            hintEl.textContent = `ช่วง ID ปัจจุบันใน Knowledge Base: ${data.min_id} ถึง ${data.max_id}`;
-        }
-    } catch (error) {
-        hintEl.textContent = "เช็คช่วง id ไม่สำเร็จ";
-    }
-}
-
-async function addTagToRange() {
-    const tagName = document.getElementById("rangeAddTagName").value.trim();
-    const startId = parseInt(document.getElementById("rangeAddStart").value, 10);
-    const endId = parseInt(document.getElementById("rangeAddEnd").value, 10);
-    const statusEl = document.getElementById("rangeAddStatus");
-
-    if (!tagName || isNaN(startId) || isNaN(endId)) {
-        statusEl.textContent = "กรอกชื่อ tag และช่วง ID ให้ครบ";
-        statusEl.style.color = "red";
-        return;
-    }
-    if (startId > endId) {
-        statusEl.textContent = "ID เริ่มต้องน้อยกว่าหรือเท่ากับ ID สิ้นสุด";
-        statusEl.style.color = "red";
-        return;
-    }
-
-    statusEl.textContent = "กำลังเพิ่ม...";
-    statusEl.style.color = "#666";
-
-    try {
-        const res = await fetch("/admin/api/tags/add-range", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tag_name: tagName, start_id: startId, end_id: endId })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
-
-        statusEl.textContent = `✅ เพิ่ม tag "${tagName}" ให้ ${data.count} chunk แล้ว`;
-        statusEl.style.color = "green";
-        loadTagManagerList();
-        loadKbTagFilterList();
-        loadScopeTagList();
-    } catch (error) {
-        statusEl.textContent = "❌ ไม่สำเร็จ: " + error;
-        statusEl.style.color = "red";
-    }
-}
-
-async function removeTagFromRange() {
-    const tagId = document.getElementById("rangeRemoveTagId").value;
-    const startId = parseInt(document.getElementById("rangeRemoveStart").value, 10);
-    const endId = parseInt(document.getElementById("rangeRemoveEnd").value, 10);
-    const statusEl = document.getElementById("rangeRemoveStatus");
-
-    if (!tagId || isNaN(startId) || isNaN(endId)) {
-        statusEl.textContent = "เลือก tag และกรอกช่วง ID ให้ครบ";
-        statusEl.style.color = "red";
-        return;
-    }
-    if (startId > endId) {
-        statusEl.textContent = "ID เริ่มต้องน้อยกว่าหรือเท่ากับ ID สิ้นสุด";
-        statusEl.style.color = "red";
-        return;
-    }
-
-    statusEl.textContent = "กำลังลบ...";
-    statusEl.style.color = "#666";
-
-    try {
-        const res = await fetch(`/admin/api/tags/${tagId}/remove-range`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ start_id: startId, end_id: endId })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
-
-        statusEl.textContent = `✅ ลบ tag ออกจาก ${data.count} chunk แล้ว`;
-        statusEl.style.color = "green";
-        loadTagManagerList();
-        loadKbTagFilterList();
-        loadScopeTagList();
-    } catch (error) {
-        statusEl.textContent = "❌ ไม่สำเร็จ: " + error;
-        statusEl.style.color = "red";
-    }
-}
-
-// เติม dropdown เลือก tag สำหรับ "ลบ tag ออกจากช่วง ID" ให้ตรงกับ tag ที่มีจริงในระบบ
-async function loadRangeRemoveDropdown() {
-    try {
-        const res = await fetch("/admin/api/tags");
-        const data = await res.json();
-        const select = document.getElementById("rangeRemoveTagId");
-        select.innerHTML = '<option value="">เลือก tag...</option>' +
-            data.tags.map(t => `<option value="${t.id}">${escapeHtml(t.name)} (${t.count})</option>`).join("");
-    } catch (error) {
-        // เงียบไว้ ไม่ critical ถ้าโหลด dropdown นี้พลาด — ผู้ใช้ยังกดปุ่มอื่นในแท็บนี้ได้ปกติ
-    }
-}
-
-// ---------- Scope filter (เตรียมไว้สำหรับ AI Agent ในระยะถัดไป — ตอนนี้ใช้ preview จำนวนก่อน) ----------
-let scopeSelectedTagIds = new Set();
-
-async function loadScopeTagList() {
-    const listEl = document.getElementById("scopeTagList");
-    try {
-        const res = await fetch("/admin/api/tags");
-        const data = await res.json();
-
-        if (data.tags.length === 0) {
-            listEl.innerHTML = '<span class="kb-filter-empty">ยังไม่มี tag ในระบบ</span>';
-            return;
-        }
-
-        listEl.innerHTML = "";
-        data.tags.forEach(tag => {
-            const chip = document.createElement("span");
-            chip.className = "kb-tag-filter-chip" + (scopeSelectedTagIds.has(tag.id) ? " active" : "");
-            chip.textContent = `${tag.name} (${tag.count})`;
-            chip.onclick = () => {
-                if (scopeSelectedTagIds.has(tag.id)) {
-                    scopeSelectedTagIds.delete(tag.id);
-                } else {
-                    scopeSelectedTagIds.add(tag.id);
-                }
-                loadScopeTagList();
-                updateScopePreview();
-            };
-            listEl.appendChild(chip);
-        });
-    } catch (error) {
-        listEl.innerHTML = '<span class="kb-filter-empty">โหลด tag ไม่สำเร็จ</span>';
-    }
-
-    loadRangeRemoveDropdown(); // โหลดคู่กันไปเลย ใช้ endpoint เดียวกัน
-}
-
-function onScopeModeChange() {
-    const mode = document.querySelector('input[name="scopeMode"]:checked').value;
-
-    // ซ่อนตัวเลือกย่อยทั้งหมดก่อน แล้วค่อยโชว์เฉพาะอันที่ตรงกับโหมดที่เลือก
-    // (ใช้ radio button ตั้งแต่แรกเพราะ radio "เลือกได้ทีละอัน" อยู่แล้วในตัว
-    // ตรงกับที่ขอว่า "เลือกทั้งหมดแล้วต้อง uncheck อย่างอื่นที่ขัดกัน" โดยไม่ต้องเขียน logic เพิ่ม)
-    document.getElementById("scopeTagList").style.display = mode === "tags" ? "flex" : "none";
-    document.getElementById("scopeIdRangeRow").style.display = mode === "id_range" ? "flex" : "none";
-
-    updateScopePreview();
-}
-
-async function updateScopePreview() {
-    const mode = document.querySelector('input[name="scopeMode"]:checked').value;
-    const countEl = document.getElementById("scopePreviewCount");
-    countEl.textContent = "...";
-
-    let url = "/admin/api/kb/scope-count?";
-    if (mode === "tags") {
-        if (scopeSelectedTagIds.size === 0) {
-            countEl.textContent = "0";
-            return;
-        }
-        url += "tag_ids=" + Array.from(scopeSelectedTagIds).join(",");
-    } else if (mode === "id_range") {
-        const startId = document.getElementById("scopeStartId").value;
-        const endId = document.getElementById("scopeEndId").value;
-        if (!startId || !endId) {
-            countEl.textContent = "-";
-            return;
-        }
-        url += `start_id=${startId}&end_id=${endId}`;
-    } else if (mode === "untagged") {
-        url += "untagged=true";
-    }
-    // mode === "all" ไม่ต้องเติม query อะไรเลย นับทั้งหมด
-
-    try {
-        const res = await fetch(url);
-        const data = await res.json();
-        countEl.textContent = data.count;
-    } catch (error) {
-        countEl.textContent = "เช็คไม่สำเร็จ";
-    }
-}
-
-// ---------- Backup / Rollback ----------
-async function loadSnapshotList() {
-    const container = document.getElementById("snapshotList");
-    try {
-        const res = await fetch("/admin/api/kb/snapshots");
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-
-        if (data.snapshots.length === 0) {
-            container.innerHTML = "<p>ยังไม่มี backup เลย — กด \"สร้าง Backup ตอนนี้\" ด้านบนเพื่อเริ่มต้น</p>";
-            return;
-        }
-
-        container.innerHTML = "";
-        data.snapshots.forEach(snap => {
-            const row = document.createElement("div");
-            row.className = "snapshot-row";
-            const dateStr = snap.created_at ? new Date(snap.created_at).toLocaleString("th-TH") : "-";
-            row.innerHTML = `
-                <div class="snapshot-info">
-                    <strong>#${snap.id}</strong> — ${dateStr}<br>
-                    <span class="snapshot-meta">${escapeHtml(snap.label || "(ไม่มีป้ายกำกับ)")} · ${snap.chunk_count} chunk</span>
+                <p class="modal-section-label" style="margin-top:0;">เพิ่ม tag ให้ chunk ในช่วง ID</p>
+                <div class="tag-range-row">
+                    <input type="text" id="rangeAddTagName" placeholder="ชื่อ tag (สร้างใหม่ได้ถ้ายังไม่มี)">
+                    <input type="number" id="rangeAddStart" placeholder="ID เริ่ม">
+                    <input type="number" id="rangeAddEnd" placeholder="ID สิ้นสุด">
+                    <button onclick="addTagToRange()">เพิ่ม</button>
                 </div>
-                <button onclick="rollbackToSnapshot(${snap.id})" class="danger-btn">⏮️ Rollback ไปเวอร์ชันนี้</button>
-            `;
-            container.appendChild(row);
-        });
-    } catch (error) {
-        container.innerHTML = "<p style='color:red;'>โหลดรายการ backup ไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
-    }
-}
+                <span id="rangeAddStatus" class="kb-toolbar-status"></span>
 
-async function createKbSnapshot() {
-    const statusEl = document.getElementById("snapshotCreateStatus");
-    const label = prompt("ใส่ป้ายกำกับ backup นี้ (ไม่บังคับ เช่น 'ก่อนแก้หมวดภาษี')") || "";
+                <p class="modal-section-label">ลบ tag ออกจาก chunk ในช่วง ID</p>
+                <div class="tag-range-row">
+                    <select id="rangeRemoveTagId"><option value="">เลือก tag...</option></select>
+                    <input type="number" id="rangeRemoveStart" placeholder="ID เริ่ม">
+                    <input type="number" id="rangeRemoveEnd" placeholder="ID สิ้นสุด">
+                    <button onclick="removeTagFromRange()" class="danger-btn">ลบ</button>
+                </div>
+                <span id="rangeRemoveStatus" class="kb-toolbar-status"></span>
+            </div>
+        </details>
 
-    statusEl.textContent = "กำลังสร้าง backup...";
-    statusEl.style.color = "#666";
+        <!-- ส่วนที่ 3: Scope filter ละเอียด — ใช้ preview ตอนนี้ และเตรียมไว้ให้ AI Agent ใช้ในระยะถัดไป -->
+        <details class="kb-toolbar-section">
+            <summary>🎯 กำหนดขอบเขต (Scope) — เตรียมไว้สำหรับ AI Agent ในระยะถัดไป</summary>
+            <div class="kb-toolbar-body">
+                <p class="ts-note">เลือกขอบเขตที่จะทำงานด้วย — เลือก "ทั้งหมด" จะปิดตัวเลือกอื่นอัตโนมัติ (กันเลือกขัดแย้งกัน)</p>
 
-    try {
-        const res = await fetch("/admin/api/kb/snapshots", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ label })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+                <label class="scope-option">
+                    <input type="radio" name="scopeMode" value="all" checked onchange="onScopeModeChange()">
+                    ทั้งหมดใน Knowledge Base
+                </label>
+                <label class="scope-option">
+                    <input type="radio" name="scopeMode" value="tags" onchange="onScopeModeChange()">
+                    เฉพาะ tag ที่เลือก (เลือกได้หลายอัน)
+                </label>
+                <div id="scopeTagList" class="kb-tag-filter-list scope-sub-option"></div>
 
-        statusEl.textContent = `✅ สร้าง backup #${data.id} สำเร็จ`;
-        statusEl.style.color = "green";
-        loadSnapshotList();
-    } catch (error) {
-        statusEl.textContent = "❌ สร้าง backup ไม่สำเร็จ: " + error;
-        statusEl.style.color = "red";
-    }
-}
+                <label class="scope-option">
+                    <input type="radio" name="scopeMode" value="id_range" onchange="onScopeModeChange()">
+                    เฉพาะช่วง ID
+                </label>
+                <div id="scopeIdRangeRow" class="tag-range-row scope-sub-option">
+                    <input type="number" id="scopeStartId" placeholder="ID เริ่ม" oninput="updateScopePreview()">
+                    <input type="number" id="scopeEndId" placeholder="ID สิ้นสุด" oninput="updateScopePreview()">
+                </div>
 
-async function rollbackToSnapshot(snapshotId) {
-    const confirmed = confirm(
-        `⚠️⚠️ ยืนยัน Rollback กลับไปเป็น backup #${snapshotId}?\n\n` +
-        `การกระทำนี้จะ "ลบข้อมูล Knowledge Base ปัจจุบันทั้งหมดทิ้ง" แล้วแทนที่ด้วยข้อมูลใน backup นี้\n\n` +
-        `ระบบจะสร้าง backup ของสถานะปัจจุบันไว้ให้อัตโนมัติก่อน rollback (เผื่อ rollback ผิดเวอร์ชันจะย้อนกลับมาได้อีกที) ` +
-        `แต่ยืนยันก่อนว่าต้องการทำจริงๆ ใช่ไหม?`
-    );
-    if (!confirmed) return;
+                <label class="scope-option">
+                    <input type="radio" name="scopeMode" value="untagged" onchange="onScopeModeChange()">
+                    เฉพาะที่ยังไม่มี tag เลย
+                </label>
 
-    try {
-        const res = await fetch(`/admin/api/kb/snapshots/${snapshotId}/rollback`, { method: "POST" });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+                <p class="scope-preview">📊 ตรงกับ <strong id="scopePreviewCount">-</strong> รายการ</p>
+            </div>
+        </details>
+        <!-- ส่วนที่ 4: Backup / Rollback — ต้องมีก่อนให้ AI Agent แตะข้อมูลจริงในระยะถัดไป -->
+        <details class="kb-toolbar-section">
+            <summary>💾 Backup & Rollback</summary>
+            <div class="kb-toolbar-body">
+                <p class="ts-note">เก็บ backup ล่าสุดไว้ 2 เวอร์ชัน (เวอร์ชันเก่าสุดถูกลบทิ้งอัตโนมัติเมื่อสร้างใหม่เกิน 2 อัน)</p>
+                <button onclick="createKbSnapshot()">📸 สร้าง Backup ตอนนี้</button>
+                <span id="snapshotCreateStatus" class="kb-toolbar-status"></span>
+                <div id="snapshotList" style="margin-top:12px;">กำลังโหลด...</div>
+            </div>
+        </details>
+        <!-- ส่วนที่ 5: AI Agent — ใช้ scope จากกล่องด้านบน ต้องอ่านคำเตือนก่อนใช้ -->
+        <details class="kb-toolbar-section">
+            <summary>🤖 AI Agent (มีความเสี่ยง — อ่านคำเตือนก่อนใช้)</summary>
+            <div class="kb-toolbar-body">
+                <p class="ts-note">Agent จะทำงานภายในขอบเขต (Scope) ที่ตั้งไว้ในกล่อง "🎯 กำหนดขอบเขต" ด้านบน — ตั้ง scope ก่อนมาที่นี่ ดูจำนวนที่ตรง scope ได้จากกล่องด้านบน</p>
 
-        alert("✅ Rollback สำเร็จแล้ว");
-        loadSnapshotList();
-        loadTagManagerList();
-        loadKbTagFilterList();
-        loadScopeTagList();
-    } catch (error) {
-        alert("❌ Rollback ไม่สำเร็จ: " + error);
-    }
-}
+                <p class="modal-section-label" style="margin-top:0;">1. เลือกงานที่จะให้ Agent ทำ</p>
+                <label class="scope-option">
+                    <input type="radio" name="agentAction" value="suggest_tags" checked onchange="onAgentActionChange()">
+                    เสนอ/เพิ่ม Tag อัตโนมัติ
+                </label>
+                <label class="scope-option">
+                    <input type="radio" name="agentAction" value="merge_chunks" onchange="onAgentActionChange()">
+                    หา chunk ที่ควรยุบรวม
+                </label>
 
-// ---------- Init ----------
-loadLogs(1); // แท็บเริ่มต้นคือ "รอตรวจสอบ"
+                <div id="agentTagOptions" style="margin:8px 0 8px 24px;">
+                    <p class="modal-section-label">รูปแบบการดู chunk</p>
+                    <label class="scope-option"><input type="radio" name="tagStrategy" value="batch" checked> ดูหลาย chunk พร้อมกัน (เร็วกว่า)</label>
+                    <label class="scope-option"><input type="radio" name="tagStrategy" value="per_chunk"> ดูทีละ chunk แยกกัน (ช้ากว่า แม่นกว่า)</label>
+                </div>
+
+                <div id="agentMergeOptions" style="display:none; margin:8px 0 8px 24px;">
+                    <p class="modal-section-label">วิธีหาคู่ที่ควรรวม</p>
+                    <label class="scope-option"><input type="radio" name="mergeStrategy" value="embedding_prefilter" checked> ใช้ embedding คัด candidate ก่อน (เร็ว/ถูกกว่า)</label>
+                    <label class="scope-option"><input type="radio" name="mergeStrategy" value="all_pairs"> เทียบทุกคู่ตรงๆ (แม่นกว่า จำกัดไม่เกิน 40 chunk/รอบ)</label>
+                </div>
+
+                <p class="modal-section-label">2. เลือกโหมดการทำงาน</p>
+                <label class="scope-option"><input type="radio" name="agentMode" value="review" checked> Review — เสนอให้ดูก่อน แก้ไขได้ ค่อยยืนยันทีละอัน</label>
+                <label class="scope-option"><input type="radio" name="agentMode" value="autonomous"> Autonomous — ทำงานอัตโนมัติทั้งหมดทันที</label>
+
+                <button onclick="startAgentJob()" class="danger-btn" style="margin-top:12px;">🚀 เริ่มทำงาน</button>
+                <span id="agentRunStatus" class="kb-toolbar-status"></span>
+            </div>
+        </details>
+
+        <!-- ส่วนที่ 6: Review Queue -->
+        <details class="kb-toolbar-section" open>
+            <summary>📋 รายการรอตรวจสอบจาก Agent (Review Queue)</summary>
+            <div class="kb-toolbar-body">
+                <div id="agentProposalList">กำลังโหลด...</div>
+            </div>
+        </details>
+
+        <!-- ส่วนที่ 7: ประวัติการทำงาน -->
+        <details class="kb-toolbar-section">
+            <summary>📜 ประวัติการทำงานของ Agent</summary>
+            <div class="kb-toolbar-body">
+                <div id="agentJobList">กำลังโหลด...</div>
+            </div>
+        </details>
+    </div>
+
+    <script src="/static/admin.js"></script>
+</body>
+</html>
