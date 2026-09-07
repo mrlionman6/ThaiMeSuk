@@ -24,6 +24,9 @@
         <button id="tabBtnUsers" class="tab-btn" onclick="switchTab('users')">
             👥 จัดการบัญชี
         </button>
+        <button id="tabBtnTags" class="tab-btn" onclick="switchTab('tags')">
+            🏷️ จัดการ Tag
+        </button>
     </div>
 
     <div id="tabPending" class="tab-panel">
@@ -72,6 +75,77 @@
     <div id="tabUsers" class="tab-panel" style="display:none;">
         <div id="usersContainer">กำลังโหลด...</div>
         <div id="usersPagination" class="pagination-bar"></div>
+    </div>
+
+    <div id="tabTags" class="tab-panel" style="display:none;">
+
+        <!-- ส่วนที่ 1: รายการ tag ทั้งหมด แก้ชื่อ/ลบทั้งหมดได้ -->
+        <details class="kb-toolbar-section" open>
+            <summary>🏷️ Tag ทั้งหมดในระบบ</summary>
+            <div class="kb-toolbar-body">
+                <div id="tagManagerList">กำลังโหลด...</div>
+            </div>
+        </details>
+
+        <!-- ส่วนที่ 2: เพิ่ม/ลบ tag ตามช่วง id -->
+        <details class="kb-toolbar-section">
+            <summary>➕➖ เพิ่ม/ลบ Tag ตามช่วง ID</summary>
+            <div class="kb-toolbar-body">
+                <p class="ts-note" id="idRangeHint">กำลังเช็คช่วง id ปัจจุบัน...</p>
+
+                <p class="modal-section-label" style="margin-top:0;">เพิ่ม tag ให้ chunk ในช่วง ID</p>
+                <div class="tag-range-row">
+                    <input type="text" id="rangeAddTagName" placeholder="ชื่อ tag (สร้างใหม่ได้ถ้ายังไม่มี)">
+                    <input type="number" id="rangeAddStart" placeholder="ID เริ่ม">
+                    <input type="number" id="rangeAddEnd" placeholder="ID สิ้นสุด">
+                    <button onclick="addTagToRange()">เพิ่ม</button>
+                </div>
+                <span id="rangeAddStatus" class="kb-toolbar-status"></span>
+
+                <p class="modal-section-label">ลบ tag ออกจาก chunk ในช่วง ID</p>
+                <div class="tag-range-row">
+                    <select id="rangeRemoveTagId"><option value="">เลือก tag...</option></select>
+                    <input type="number" id="rangeRemoveStart" placeholder="ID เริ่ม">
+                    <input type="number" id="rangeRemoveEnd" placeholder="ID สิ้นสุด">
+                    <button onclick="removeTagFromRange()" class="danger-btn">ลบ</button>
+                </div>
+                <span id="rangeRemoveStatus" class="kb-toolbar-status"></span>
+            </div>
+        </details>
+
+        <!-- ส่วนที่ 3: Scope filter ละเอียด — ใช้ preview ตอนนี้ และเตรียมไว้ให้ AI Agent ใช้ในระยะถัดไป -->
+        <details class="kb-toolbar-section">
+            <summary>🎯 กำหนดขอบเขต (Scope) — เตรียมไว้สำหรับ AI Agent ในระยะถัดไป</summary>
+            <div class="kb-toolbar-body">
+                <p class="ts-note">เลือกขอบเขตที่จะทำงานด้วย — เลือก "ทั้งหมด" จะปิดตัวเลือกอื่นอัตโนมัติ (กันเลือกขัดแย้งกัน)</p>
+
+                <label class="scope-option">
+                    <input type="radio" name="scopeMode" value="all" checked onchange="onScopeModeChange()">
+                    ทั้งหมดใน Knowledge Base
+                </label>
+                <label class="scope-option">
+                    <input type="radio" name="scopeMode" value="tags" onchange="onScopeModeChange()">
+                    เฉพาะ tag ที่เลือก (เลือกได้หลายอัน)
+                </label>
+                <div id="scopeTagList" class="kb-tag-filter-list scope-sub-option"></div>
+
+                <label class="scope-option">
+                    <input type="radio" name="scopeMode" value="id_range" onchange="onScopeModeChange()">
+                    เฉพาะช่วง ID
+                </label>
+                <div id="scopeIdRangeRow" class="tag-range-row scope-sub-option">
+                    <input type="number" id="scopeStartId" placeholder="ID เริ่ม" oninput="updateScopePreview()">
+                    <input type="number" id="scopeEndId" placeholder="ID สิ้นสุด" oninput="updateScopePreview()">
+                </div>
+
+                <label class="scope-option">
+                    <input type="radio" name="scopeMode" value="untagged" onchange="onScopeModeChange()">
+                    เฉพาะที่ยังไม่มี tag เลย
+                </label>
+
+                <p class="scope-preview">📊 ตรงกับ <strong id="scopePreviewCount">-</strong> รายการ</p>
+            </div>
+        </details>
     </div>
 
     <script src="/static/admin.js"></script>
