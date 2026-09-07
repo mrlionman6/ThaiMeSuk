@@ -10,6 +10,8 @@ from db import (
     set_tags_for_chunk,
     get_tags_for_chunk,
     get_all_tags,
+    knowledge_chunk_exists,
+    add_knowledge_chunk_at_id,
     rename_tag,
     delete_tag_entirely,
     remove_tag_from_chunk_range,
@@ -664,6 +666,7 @@ class KBUpdate(BaseModel):
 class KBCreate(BaseModel):
     content: str
     tags: Optional[list[str]] = None
+    chunk_id: Optional[int] = None  # ถ้าระบุมา จะพยายามเพิ่มที่ id นี้ตรงๆ (เช่น เติมคืนตำแหน่งที่เคยลบไป) ไม่ระบุ = ต่อท้ายอัตโนมัติตามปกติ
 
 class TagRename(BaseModel):
     name: str
@@ -1212,12 +1215,24 @@ def export_kb(tag_ids: str = "", _: bool = Depends(require_login)):
 
 @app.post("/admin/api/kb")
 def create_kb(body: KBCreate, _: bool = Depends(require_login)):
-    """เพิ่ม chunk เดี่ยว พิมพ์เองผ่านหน้า admin — คำนวณ embedding ทันที ไม่ต้อง restart"""
+    """เพิ่ม chunk เดี่ยว พิมพ์เองผ่านหน้า admin — คำนวณ embedding ทันที ไม่ต้อง restart
+    ถ้าระบุ chunk_id มา จะพยายามเพิ่มที่ id นั้นตรงๆ (กัน id ชนด้วย HTTP 409) ไม่ระบุ = ต่อท้ายอัตโนมัติตามปกติ"""
     content = body.content.strip()
     if not content:
         raise HTTPException(status_code=400, detail="เนื้อหาห้ามว่างเปล่า")
     embedding = embed_model.encode(content).tolist()
-    new_id = add_knowledge_chunk(content, embedding=embedding)
+
+    if body.chunk_id is not None:
+        if knowledge_chunk_exists(body.chunk_id):
+            raise HTTPException(
+                status_code=409,
+                detail=f"มี chunk #{body.chunk_id} อยู่แล้วในระบบ ไม่สามารถเพิ่มทับตำแหน่งนี้ได้",
+            )
+        add_knowledge_chunk_at_id(body.chunk_id, content, embedding=embedding)
+        new_id = body.chunk_id
+    else:
+        new_id = add_knowledge_chunk(content, embedding=embedding)
+
     if body.tags:
         set_tags_for_chunk(new_id, body.tags)
     rebuild_index()
