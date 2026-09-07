@@ -2,9 +2,14 @@ from db import (
     init_db,
     get_all_knowledge_base_with_ids,
     get_all_knowledge_base_full,
+    get_all_knowledge_base_for_export,
     add_knowledge_chunk,
     update_knowledge_chunk,
     delete_knowledge_chunk,
+    get_or_create_tag,
+    set_tags_for_chunk,
+    get_tags_for_chunk,
+    get_all_tags,
     get_chunks_missing_embeddings,
     set_embedding,
     get_vector_scores_for_all,
@@ -648,9 +653,11 @@ class LogAction(BaseModel):
 
 class KBUpdate(BaseModel):
     content: str
+    tags: Optional[list[str]] = None  # None = ไม่แก้ tag เดิม, [] = ลบ tag ทั้งหมด, [...] = แทนที่ทั้งชุด
 
 class KBCreate(BaseModel):
     content: str
+    tags: Optional[list[str]] = None
 
 class SecurityAnswerInput(BaseModel):
     question_id: int
@@ -1102,10 +1109,32 @@ def reject_log(action: LogAction, _: bool = Depends(require_login)):
     return {"status": "rejected"}
 
 # ---------- Admin API (จัดการ Knowledge Base โดยตรง — แท็บใหม่) ----------
+@app.get("/admin/api/tags")
+def list_tags(_: bool = Depends(require_login)):
+    """คืนรายการ tag ทั้งหมดพร้อมจำนวน chunk ที่ผูกอยู่ — ใช้ทำ dropdown ตัวกรองในหน้า admin"""
+    return {"tags": get_all_tags()}
+
 @app.get("/admin/api/kb")
-def list_kb(page: int = 1, page_size: int = 10, _: bool = Depends(require_login)):
-    result = get_all_knowledge_base_full(page=page, page_size=page_size)
+def list_kb(page: int = 1, page_size: int = 10, tag_ids: str = "", _: bool = Depends(require_login)):
+    """tag_ids ส่งมาเป็น comma-separated string เช่น "1,3,5" (query param ธรรมดารับ list ตรงๆ ไม่สะดวกเท่านี้)"""
+    parsed_tag_ids = [int(t) for t in tag_ids.split(",") if t.strip().isdigit()] if tag_ids else None
+    result = get_all_knowledge_base_full(page=page, page_size=page_size, tag_ids=parsed_tag_ids)
     return {"chunks": result["items"], "total": result["total"], "page": page, "page_size": page_size}
+
+@app.get("/admin/api/kb/export")
+def export_kb(tag_ids: str = "", _: bool = Depends(require_login)):
+    """Export KB ทั้งหมด (หรือเฉพาะที่ filter อยู่ ถ้าส่ง tag_ids มา) เป็นไฟล์ JSON ให้ดาวน์โหลด
+    ฟอร์แมตเดียวกับที่ bulk import รองรับ เอาไฟล์ที่ export ออกมา import กลับเข้าไปใหม่ได้เลย"""
+    parsed_tag_ids = [int(t) for t in tag_ids.split(",") if t.strip().isdigit()] if tag_ids else None
+    chunks = get_all_knowledge_base_for_export(tag_ids=parsed_tag_ids)
+    export_data = [{"content": c["content"], "tags": c["tags"]} for c in chunks]
+    json_bytes = json.dumps(export_data, ensure_ascii=False, indent=2).encode("utf-8")
+
+    return StreamingResponse(
+        io.BytesIO(json_bytes),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=knowledge_base_export.json"},
+    )
 
 @app.post("/admin/api/kb")
 def create_kb(body: KBCreate, _: bool = Depends(require_login)):
@@ -1115,13 +1144,15 @@ def create_kb(body: KBCreate, _: bool = Depends(require_login)):
         raise HTTPException(status_code=400, detail="เนื้อหาห้ามว่างเปล่า")
     embedding = embed_model.encode(content).tolist()
     new_id = add_knowledge_chunk(content, embedding=embedding)
+    if body.tags:
+        set_tags_for_chunk(new_id, body.tags)
     rebuild_index()
     return {"status": "created", "id": new_id}
 
 @app.post("/admin/api/kb/bulk")
 async def bulk_create_kb(file: UploadFile = File(...), _: bool = Depends(require_login)):
-    """Import หลาย chunk พร้อมกันจากไฟล์ — รองรับ .json (list ของ string หรือ dict ที่มี key content
-    เหมือนโครงสร้าง knowledge_base.json เดิม) หรือ .txt (หนึ่งบรรทัดต่อหนึ่ง chunk)"""
+    """Import หลาย chunk พร้อมกันจากไฟล์ — รองรับ .json (list ของ string ธรรมดา, หรือ dict รูปแบบ
+    {"content": "...", "tags": ["ภาษี", "ที่ดิน"]} ถ้าอยากใส่ tag มาด้วยตอน import) หรือ .txt (หนึ่งบรรทัดต่อหนึ่ง chunk ไม่มี tag)"""
     raw = await file.read()
     try:
         text_content = raw.decode("utf-8")
@@ -1134,20 +1165,29 @@ async def bulk_create_kb(file: UploadFile = File(...), _: bool = Depends(require
             data = json.loads(text_content)
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="ไฟล์ JSON รูปแบบไม่ถูกต้อง")
-        items = [d["content"] if isinstance(d, dict) else str(d) for d in data]
+        # แต่ละ item เป็น string ธรรมดา (ไม่มี tag) หรือ dict {"content":..., "tags":[...]} (มี tag) ก็ได้
+        items = []
+        for d in data:
+            if isinstance(d, dict):
+                items.append({"content": str(d.get("content", "")), "tags": d.get("tags") or []})
+            else:
+                items.append({"content": str(d), "tags": []})
     else:
-        # .txt หรือนามสกุลอื่น: ถือว่าหนึ่งบรรทัดคือหนึ่ง chunk ข้ามบรรทัดว่าง
-        items = [line.strip() for line in text_content.splitlines() if line.strip()]
+        # .txt หรือนามสกุลอื่น: ถือว่าหนึ่งบรรทัดคือหนึ่ง chunk ไม่มี tag ข้ามบรรทัดว่าง
+        items = [{"content": line.strip(), "tags": []} for line in text_content.splitlines() if line.strip()]
 
-    items = [i.strip() for i in items if i and i.strip()]
+    items = [i for i in items if i["content"].strip()]
     if not items:
         raise HTTPException(status_code=400, detail="ไม่พบเนื้อหาที่ import ได้ในไฟล์นี้")
 
-    embeddings = embed_model.encode(items)  # batch encode ครั้งเดียว เร็วกว่า loop เรียกทีละตัว
-    added_ids = [
-        add_knowledge_chunk(content, embedding=embedding.tolist())
-        for content, embedding in zip(items, embeddings)
-    ]
+    contents = [i["content"] for i in items]
+    embeddings = embed_model.encode(contents)  # batch encode ครั้งเดียว เร็วกว่า loop เรียกทีละตัว
+    added_ids = []
+    for item, embedding in zip(items, embeddings):
+        new_id = add_knowledge_chunk(item["content"], embedding=embedding.tolist())
+        if item["tags"]:
+            set_tags_for_chunk(new_id, item["tags"])
+        added_ids.append(new_id)
 
     rebuild_index()
     return {"status": "created", "count": len(added_ids), "ids": added_ids}
@@ -1158,6 +1198,8 @@ def edit_kb(chunk_id: int, body: KBUpdate, _: bool = Depends(require_login)):
     ok = update_knowledge_chunk(chunk_id, body.content, embedding=embedding)
     if not ok:
         raise HTTPException(status_code=404, detail="Chunk not found")
+    if body.tags is not None:  # None = ไม่แตะ tag เดิม, [] = ลบทั้งหมด, [...] = แทนที่ทั้งชุด
+        set_tags_for_chunk(chunk_id, body.tags)
     rebuild_index()
     return {"status": "updated"}
 
