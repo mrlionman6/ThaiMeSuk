@@ -12,6 +12,9 @@ from db import (
     get_all_tags,
     knowledge_chunk_exists,
     add_knowledge_chunk_at_id,
+    create_kb_snapshot,
+    get_kb_snapshots,
+    rollback_to_snapshot,
     rename_tag,
     delete_tag_entirely,
     remove_tag_from_chunk_range,
@@ -680,6 +683,9 @@ class TagRangeAdd(BaseModel):
     start_id: int
     end_id: int
 
+class SnapshotCreate(BaseModel):
+    label: Optional[str] = ""
+
 class SecurityAnswerInput(BaseModel):
     question_id: int
     answer: str
@@ -1190,6 +1196,28 @@ def get_kb_scope_count(
     parsed_tag_ids = [int(t) for t in tag_ids.split(",") if t.strip().isdigit()] if tag_ids else None
     count = count_knowledge_base_by_scope(tag_ids=parsed_tag_ids, untagged=untagged, start_id=start_id, end_id=end_id)
     return {"count": count}
+
+@app.get("/admin/api/kb/snapshots")
+def list_kb_snapshots_endpoint(_: bool = Depends(require_login)):
+    """คืนรายการ backup ทั้งหมดที่มีอยู่ (สูงสุด 2 เวอร์ชันตามที่ออกแบบไว้ — rolling window)"""
+    return {"snapshots": get_kb_snapshots()}
+
+@app.post("/admin/api/kb/snapshots")
+def create_kb_snapshot_endpoint(body: SnapshotCreate, _: bool = Depends(require_login)):
+    """สร้าง backup ของ KB ทั้งหมด (เนื้อหา+embedding+tags) ณ ตอนนี้ — ถ้ามีเกิน 2 เวอร์ชัน จะลบเก่าสุดทิ้งอัตโนมัติ"""
+    new_id = create_kb_snapshot(label=body.label or "")
+    return {"status": "created", "id": new_id}
+
+@app.post("/admin/api/kb/snapshots/{snapshot_id}/rollback")
+def rollback_kb_snapshot_endpoint(snapshot_id: int, _: bool = Depends(require_login)):
+    """Restore KB ทั้งหมดกลับไปเป็น snapshot ที่ระบุ — สร้าง snapshot ของสถานะปัจจุบันไว้ก่อนเสมอ
+    (เผื่อ rollback ผิดเวอร์ชัน จะย้อนกลับมาแก้ไขได้อีกที ไม่ใช่ทำลายข้อมูลปัจจุบันแบบไม่มีทางถอย)"""
+    create_kb_snapshot(label="ก่อน rollback (สร้างอัตโนมัติ)")
+    ok = rollback_to_snapshot(snapshot_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="ไม่พบ snapshot นี้")
+    rebuild_index()  # ข้อมูลเปลี่ยนไปทั้งชุด ต้องคำนวณ BM25/vector cache ใหม่ทั้งหมด
+    return {"status": "rolled_back"}
 
 @app.get("/admin/api/kb")
 def list_kb(page: int = 1, page_size: int = 10, tag_ids: str = "", _: bool = Depends(require_login)):
