@@ -988,3 +988,23 @@ button {
     border-radius: 6px;
     font-size: 14px;
 }
+
+/* ---------- Admin: Backup/Rollback snapshots ---------- */
+.snapshot-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+}
+
+.snapshot-info {
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.snapshot-meta {
+    color: #888;
+    font-size: 12px;
+}
