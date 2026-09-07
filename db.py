@@ -10,7 +10,9 @@ db.py — เลเยอร์เชื่อมต่อ PostgreSQL สำห�
 การใช้งานใน main.py:
     from db import (
         init_db, get_all_knowledge_base_with_ids, get_all_knowledge_base_full,
+        get_all_knowledge_base_for_export,
         add_knowledge_chunk, update_knowledge_chunk, delete_knowledge_chunk,
+        get_or_create_tag, set_tags_for_chunk, get_tags_for_chunk, get_all_tags,
         get_chunks_missing_embeddings, set_embedding, get_vector_scores_for_all,
         get_logs, get_logs_paginated, log_low_confidence_query, approve_log, reject_log,
         create_user, get_user_by_username, get_user_by_id, update_user_password,
@@ -27,7 +29,7 @@ import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    create_engine, Column, Integer, Text, DateTime, Float, String, JSON, text, ForeignKey
+    create_engine, Column, Integer, Text, DateTime, Float, String, JSON, text, ForeignKey, func
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 from pgvector.sqlalchemy import Vector
@@ -52,6 +54,22 @@ class KnowledgeBase(Base):
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
     embedding = Column(Vector(EMBEDDING_DIM), nullable=True)  # nullable เพราะ chunk เก่าอาจยังไม่มีค่า (backfill ทีหลัง)
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True, index=True)
+
+
+class KnowledgeBaseTag(Base):
+    """ตารางกลาง many-to-many — 1 chunk มีได้หลาย tag, 1 tag ผูกได้หลาย chunk"""
+    __tablename__ = "knowledge_base_tags"
+
+    id = Column(Integer, primary_key=True)
+    chunk_id = Column(Integer, ForeignKey("knowledge_base.id", ondelete="CASCADE"), nullable=False, index=True)
+    tag_id = Column(Integer, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False, index=True)
 
 
 class Log(Base):
@@ -157,6 +175,14 @@ def init_db():
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0"))
         conn.commit()
 
+    # กัน insert tag ซ้ำคู่เดียวกันสองรอบ (เช่น เผลอกด set_tags_for_chunk ซ้อนกัน) — เป็นตารางใหม่ create_all
+    # สร้างให้แล้ว แค่เพิ่ม unique constraint คู่ (chunk_id, tag_id) เข้าไปอีกชั้น
+    with engine.connect() as conn:
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_kb_tags_unique ON knowledge_base_tags(chunk_id, tag_id)"
+        ))
+        conn.commit()
+
 
 # ---------- Knowledge base ----------
 
@@ -168,11 +194,19 @@ def get_all_knowledge_base_with_ids() -> list[dict]:
         return [{"id": r.id, "content": r.content} for r in rows]
 
 
-def get_all_knowledge_base_full(page: int = 1, page_size: int = 10) -> dict:
-    """คืนค่า id + content + created_at แบบแบ่งหน้า — ใช้แสดงในแท็บจัดการ KB
+def get_all_knowledge_base_full(page: int = 1, page_size: int = 10, tag_ids: Optional[list[int]] = None) -> dict:
+    """คืนค่า id + content + created_at + tags แบบแบ่งหน้า — ใช้แสดงในแท็บจัดการ KB
+    ถ้าส่ง tag_ids มา จะกรองเฉพาะ chunk ที่มีอย่างน้อย 1 ใน tag ที่ระบุ (OR ไม่ใช่ AND)
     คืนค่า {"items": [...], "total": จำนวนทั้งหมด}"""
     with SessionLocal() as session:
-        q = session.query(KnowledgeBase).order_by(KnowledgeBase.id)
+        q = session.query(KnowledgeBase)
+        if tag_ids:
+            q = (
+                q.join(KnowledgeBaseTag, KnowledgeBaseTag.chunk_id == KnowledgeBase.id)
+                .filter(KnowledgeBaseTag.tag_id.in_(tag_ids))
+                .distinct()
+            )
+        q = q.order_by(KnowledgeBase.id)
         total = q.count()
         rows = q.offset((page - 1) * page_size).limit(page_size).all()
         items = [
@@ -181,10 +215,88 @@ def get_all_knowledge_base_full(page: int = 1, page_size: int = 10) -> dict:
                 "content": r.content,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "has_embedding": r.embedding is not None,
+                "tags": get_tags_for_chunk(r.id),
             }
             for r in rows
         ]
         return {"items": items, "total": total}
+
+
+def get_all_knowledge_base_for_export(tag_ids: Optional[list[int]] = None) -> list[dict]:
+    """เหมือน get_all_knowledge_base_full แต่ไม่แบ่งหน้า — เอาทั้งหมด (หรือทั้งหมดที่ตรง filter) สำหรับ export"""
+    with SessionLocal() as session:
+        q = session.query(KnowledgeBase)
+        if tag_ids:
+            q = (
+                q.join(KnowledgeBaseTag, KnowledgeBaseTag.chunk_id == KnowledgeBase.id)
+                .filter(KnowledgeBaseTag.tag_id.in_(tag_ids))
+                .distinct()
+            )
+        rows = q.order_by(KnowledgeBase.id).all()
+        return [
+            {"id": r.id, "content": r.content, "tags": get_tags_for_chunk(r.id)}
+            for r in rows
+        ]
+
+
+# ---------- Tags (many-to-many กับ knowledge_base) ----------
+
+def get_or_create_tag(name: str) -> int:
+    """คืน tag id — ถ้ายังไม่มี tag ชื่อนี้ (เทียบแบบ trim ช่องว่างแล้ว) จะสร้างใหม่ให้อัตโนมัติ"""
+    name = name.strip()
+    with SessionLocal() as session:
+        existing = session.query(Tag).filter(Tag.name == name).first()
+        if existing:
+            return existing.id
+        row = Tag(name=name)
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row.id
+
+
+def set_tags_for_chunk(chunk_id: int, tag_names: list[str]):
+    """ตั้ง tag ให้ chunk หนึ่ง — แทนที่ชุดเดิมทั้งหมดด้วยชุดใหม่ที่ส่งมา (ไม่ใช่ append ต่อท้าย)
+    ส่ง list ว่างมาเพื่อลบ tag ทั้งหมดออกจาก chunk นี้ได้"""
+    with SessionLocal() as session:
+        session.query(KnowledgeBaseTag).filter(KnowledgeBaseTag.chunk_id == chunk_id).delete()
+        session.commit()
+
+    seen = set()
+    for name in tag_names:
+        name = name.strip()
+        if not name or name in seen:
+            continue  # กัน tag ซ้ำในลิสต์เดียวกัน (เช่น user พิมพ์ "ภาษี, ภาษี")
+        seen.add(name)
+        tag_id = get_or_create_tag(name)
+        with SessionLocal() as session:
+            session.add(KnowledgeBaseTag(chunk_id=chunk_id, tag_id=tag_id))
+            session.commit()
+
+
+def get_tags_for_chunk(chunk_id: int) -> list[str]:
+    with SessionLocal() as session:
+        rows = (
+            session.query(Tag.name)
+            .join(KnowledgeBaseTag, KnowledgeBaseTag.tag_id == Tag.id)
+            .filter(KnowledgeBaseTag.chunk_id == chunk_id)
+            .order_by(Tag.name)
+            .all()
+        )
+        return [r[0] for r in rows]
+
+
+def get_all_tags() -> list[dict]:
+    """คืน tag ทั้งหมดพร้อมจำนวน chunk ที่ผูกอยู่ — ใช้ทำ dropdown ตัวกรองในหน้า admin"""
+    with SessionLocal() as session:
+        rows = (
+            session.query(Tag.id, Tag.name, func.count(KnowledgeBaseTag.chunk_id))
+            .outerjoin(KnowledgeBaseTag, KnowledgeBaseTag.tag_id == Tag.id)
+            .group_by(Tag.id, Tag.name)
+            .order_by(Tag.name)
+            .all()
+        )
+        return [{"id": r[0], "name": r[1], "count": r[2]} for r in rows]
 
 
 def add_knowledge_chunk(content: str, embedding: Optional[list[float]] = None) -> int:
@@ -213,7 +325,7 @@ def update_knowledge_chunk(chunk_id: int, content: str, embedding: Optional[list
 
 
 def delete_knowledge_chunk(chunk_id: int) -> bool:
-    """ลบ chunk ทิ้ง — คืนค่า False ถ้าไม่เจอ id นี้"""
+    """ลบ chunk ทิ้ง — คืนค่า False ถ้าไม่เจอ id นี้ (ON DELETE CASCADE ลบ tag ที่ผูกไว้ให้เองด้วย)"""
     with SessionLocal() as session:
         row = session.get(KnowledgeBase, chunk_id)
         if row is None:
