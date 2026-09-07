@@ -15,6 +15,14 @@ from db import (
     create_kb_snapshot,
     get_kb_snapshots,
     rollback_to_snapshot,
+    get_embeddings_for_chunks,
+    create_agent_job,
+    finish_agent_job,
+    get_agent_jobs,
+    create_agent_proposal,
+    get_agent_proposals,
+    get_proposal_by_id,
+    update_proposal_status,
     rename_tag,
     delete_tag_entirely,
     remove_tag_from_chunk_range,
@@ -463,6 +471,189 @@ def run_agentic_tool_loop(system_prompt: str, initial_messages: list) -> str:
     text_parts = [block.text for block in response.content if block.type == "text"]
     return "".join(text_parts).strip()
 
+
+# ---------- ระยะ 3: AI Agent สำหรับจัดการ KB (เสนอ tag / ยุบรวม chunk) ----------
+TAG_BATCH_SIZE = 20  # จำนวน chunk สูงสุดต่อการเรียก Claude 1 ครั้งในโหมด "ดูหลาย chunk พร้อมกัน" กัน context ยาวเกินไป
+MAX_CHUNKS_FOR_ALL_PAIRS = 40  # จำกัดจำนวน chunk สูงสุดสำหรับโหมด "เทียบทุกคู่ตรงๆ" กัน context/cost ระเบิด
+
+
+def _parse_json_response(raw_text: str, expected_type: type):
+    """ช่วย parse JSON ที่ Claude ตอบกลับมา — ทนกรณี Claude ใส่ ```json แปะมาด้วยทั้งที่สั่งห้ามแล้ว"""
+    cleaned = raw_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+    try:
+        result = json.loads(cleaned)
+        if isinstance(result, expected_type):
+            return result
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
+def suggest_tags_for_chunk(content: str, existing_tag_names: list[str]) -> list[str]:
+    """ให้ Claude เสนอ tag ให้ chunk เดียว (โหมด 'ดูทีละ chunk แยกกัน')"""
+    existing_list_str = ", ".join(existing_tag_names) if existing_tag_names else "(ยังไม่มี tag ในระบบเลย)"
+    prompt = (
+        "คุณกำลังช่วยจัดหมวดหมู่ (tag) ให้เนื้อหาความรู้กฎหมายไทยชิ้นหนึ่ง\n\n"
+        f"Tag ที่มีอยู่แล้วในระบบ: {existing_list_str}\n\n"
+        f"เนื้อหา:\n{content}\n\n"
+        "หน้าที่ของคุณ: เสนอ tag ที่เหมาะสมให้เนื้อหานี้ 1-3 tag "
+        "ให้ใช้ tag ที่มีอยู่แล้วซ้ำถ้าตรงกับเนื้อหา (อย่าสร้างใหม่พร่ำเพรื่อถ้ามีของเดิมที่ใช้ได้อยู่แล้ว) "
+        "ตอบกลับมาเป็น JSON array ของ string เท่านั้น เช่น [\"ภาษี\", \"ที่ดิน\"] ห้ามมีข้อความอื่นนอกเหนือจาก JSON"
+    )
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001", max_tokens=200,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    result = _parse_json_response(response.content[0].text, list)
+    if result is None:
+        return []
+    return [str(t).strip() for t in result if str(t).strip()]
+
+
+def suggest_tags_for_batch(chunks: list[dict], existing_tag_names: list[str]) -> dict:
+    """ให้ Claude เสนอ tag ให้หลาย chunk พร้อมกันในคำขอเดียว (โหมด 'ดูหลาย chunk พร้อมกัน')
+    chunks = [{"id":, "content":}, ...] คืน dict {chunk_id: [tags]}"""
+    existing_list_str = ", ".join(existing_tag_names) if existing_tag_names else "(ยังไม่มี tag ในระบบเลย)"
+    chunks_text = "\n\n".join(f"[chunk_id={c['id']}]\n{c['content']}" for c in chunks)
+    prompt = (
+        "คุณกำลังช่วยจัดหมวดหมู่ (tag) ให้เนื้อหาความรู้กฎหมายไทยหลายชิ้นพร้อมกัน\n\n"
+        f"Tag ที่มีอยู่แล้วในระบบ: {existing_list_str}\n\n"
+        f"เนื้อหาทั้งหมด:\n{chunks_text}\n\n"
+        "หน้าที่ของคุณ: เสนอ tag ที่เหมาะสม 1-3 tag ให้กับแต่ละ chunk แยกกัน "
+        "ให้ใช้ tag ที่มีอยู่แล้วซ้ำถ้าตรงกับเนื้อหา (อย่าสร้างใหม่พร่ำเพรื่อ) "
+        'ตอบกลับมาเป็น JSON object เท่านั้น รูปแบบ {"12": ["ภาษี"], "13": ["ที่ดิน", "ภาษี"]} '
+        "(key เป็น chunk_id แบบ string) ห้ามมีข้อความอื่นนอกเหนือจาก JSON"
+    )
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001", max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    result = _parse_json_response(response.content[0].text, dict)
+    if result is None:
+        return {}
+    parsed = {}
+    for k, v in result.items():
+        try:
+            chunk_id = int(k)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(v, list):
+            parsed[chunk_id] = [str(t).strip() for t in v if str(t).strip()]
+    return parsed
+
+
+def find_merge_candidates_all_pairs(chunks: list[dict]) -> list[dict]:
+    """ให้ Claude ดู chunk ทั้งหมดใน scope พร้อมกัน เทียบกันเองตรงๆ หาเนื้อหาที่ควรยุบรวม (แม่นกว่า แพงกว่า)
+    chunks = [{"id":, "content":}, ...] คืน list ของ {"chunk_ids": [...], "reason": "...", "merged_content": "..."}"""
+    if len(chunks) < 2:
+        return []
+    chunks_text = "\n\n".join(f"[chunk_id={c['id']}]\n{c['content']}" for c in chunks)
+    prompt = (
+        "ต่อไปนี้คือเนื้อหาความรู้กฎหมายไทยหลายชิ้นจาก Knowledge Base เดียวกัน\n\n"
+        f"{chunks_text}\n\n"
+        "หน้าที่ของคุณ: หาเนื้อหาที่ซ้ำซ้อนกันมาก หรือควรรวมเป็นชิ้นเดียวกันเพื่อความกระชับ "
+        "(เช่น พูดเรื่องเดียวกันแค่คนละมุม หรือข้อมูลเดียวกันถูกแยกเป็นหลายชิ้นโดยไม่จำเป็น) "
+        "ถ้าไม่มีคู่ไหนควรรวมเลย ให้ตอบ [] เปล่าๆ\n\n"
+        "ตอบกลับมาเป็น JSON array เท่านั้น รูปแบบ:\n"
+        '[{"chunk_ids": [12, 13], "reason": "เหตุผลสั้นๆ", "merged_content": "เนื้อหาที่รวมแล้ว เขียนใหม่ให้กระชับครบถ้วนไม่ซ้ำซ้อน"}]\n'
+        "ห้ามมีข้อความอื่นนอกเหนือจาก JSON"
+    )
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001", max_tokens=3000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    result = _parse_json_response(response.content[0].text, list)
+    return result if result is not None else []
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    a_arr, b_arr = np.array(a), np.array(b)
+    denom = np.linalg.norm(a_arr) * np.linalg.norm(b_arr)
+    return float(np.dot(a_arr, b_arr) / denom) if denom > 0 else 0.0
+
+
+def find_merge_candidates_embedding_prefilter(chunks: list[dict], threshold: float = 0.85) -> list[dict]:
+    """ใช้ cosine similarity ของ embedding ที่มีอยู่แล้วคัด candidate คู่ที่คล้ายกันมากพอก่อน (เร็ว/ถูกกว่า)
+    แล้วค่อยส่งเฉพาะคู่ที่ผ่านเกณฑ์ให้ Claude ตัดสินว่าควรรวมจริงไหม + เสนอเนื้อหาที่รวมแล้ว"""
+    ids = [c["id"] for c in chunks]
+    embeddings = get_embeddings_for_chunks(ids)
+
+    candidate_pairs = []
+    for i in range(len(ids)):
+        for j in range(i + 1, len(ids)):
+            if embeddings[i] is None or embeddings[j] is None:
+                continue
+            sim = _cosine_similarity(embeddings[i], embeddings[j])
+            if sim >= threshold:
+                candidate_pairs.append((ids[i], ids[j], sim))
+
+    if not candidate_pairs:
+        return []
+
+    content_by_id = {c["id"]: c["content"] for c in chunks}
+    pairs_text = "\n\n".join(
+        f"คู่ที่ {idx + 1}: chunk_id={a} กับ chunk_id={b} (ความคล้ายทาง embedding {sim:.2f})\n"
+        f"[chunk_id={a}]\n{content_by_id[a]}\n\n[chunk_id={b}]\n{content_by_id[b]}"
+        for idx, (a, b, sim) in enumerate(candidate_pairs)
+    )
+    prompt = (
+        "ต่อไปนี้คือคู่เนื้อหาที่ระบบคัดกรองมาแล้วว่ามีความคล้ายกันทางความหมายสูง "
+        "ช่วยตัดสินว่าคู่ไหน 'ควรยุบรวมจริง' (เนื้อหาซ้ำซ้อน/พูดเรื่องเดียวกัน) กับคู่ไหน "
+        "'แค่คล้ายแต่ไม่ควรรวม' (พูดคนละประเด็นแม้ใช้คำคล้ายกัน)\n\n"
+        f"{pairs_text}\n\n"
+        "ตอบกลับมาเป็น JSON array เฉพาะคู่ที่ 'ควรรวมจริง' เท่านั้น รูปแบบ:\n"
+        '[{"chunk_ids": [12, 13], "reason": "เหตุผลสั้นๆ", "merged_content": "เนื้อหาที่รวมแล้ว"}]\n'
+        "ถ้าไม่มีคู่ไหนควรรวมเลย ให้ตอบ [] เปล่าๆ ห้ามมีข้อความอื่นนอกเหนือจาก JSON"
+    )
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001", max_tokens=3000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    result = _parse_json_response(response.content[0].text, list)
+    return result if result is not None else []
+
+
+def apply_merge(chunk_ids: list[int], merged_content: str) -> int:
+    """ยุบรวม chunk หลายตัวเป็นชิ้นเดียว — รวม tag ของทุกตัวเดิมเข้าด้วยกัน (union ไม่ซ้ำ)
+    สร้าง chunk ใหม่แล้วลบของเก่าทั้งหมดทิ้ง (ปลอดภัยเพราะมี snapshot ป้องกันไว้ก่อนรันเสมอ) คืนค่า id ใหม่ที่สร้าง"""
+    all_tags = set()
+    for cid in chunk_ids:
+        all_tags.update(get_tags_for_chunk(cid))
+
+    embedding = embed_model.encode(merged_content).tolist()
+    new_id = add_knowledge_chunk(merged_content, embedding=embedding)
+    if all_tags:
+        set_tags_for_chunk(new_id, list(all_tags))
+
+    for cid in chunk_ids:
+        delete_knowledge_chunk(cid)
+
+    return new_id
+
+
+def _get_chunks_for_scope(
+    scope_mode: str,
+    tag_ids: Optional[list[int]],
+    start_id: Optional[int],
+    end_id: Optional[int],
+) -> list[dict]:
+    """ดึง chunk เต็ม (id+content+tags) ตาม scope ที่เลือกไว้ — ใช้ร่วมกันทั้ง suggest_tags และ merge_chunks"""
+    if scope_mode == "tags":
+        return get_all_knowledge_base_for_export(tag_ids=tag_ids)
+    if scope_mode == "id_range":
+        all_chunks = get_all_knowledge_base_for_export(tag_ids=None)
+        return [c for c in all_chunks if start_id <= c["id"] <= end_id]
+    if scope_mode == "untagged":
+        all_chunks = get_all_knowledge_base_for_export(tag_ids=None)
+        return [c for c in all_chunks if not c["tags"]]
+    return get_all_knowledge_base_for_export(tag_ids=None)  # scope_mode == "all"
+
+
 def describe_image_for_retrieval(image_data: dict, query: str) -> tuple[bool, str]:
     """ใช้ Claude Haiku (vision) เช็คว่าภาพเกี่ยวข้องกับกฎหมาย/เอกสารไหม + สรุปเนื้อหาถ้าเกี่ยวข้อง
     เพื่อเอาไปใช้เป็นส่วนหนึ่งของ query สำหรับค้นหาใน Knowledge Base
@@ -685,6 +876,21 @@ class TagRangeAdd(BaseModel):
 
 class SnapshotCreate(BaseModel):
     label: Optional[str] = ""
+
+class AgentJobStart(BaseModel):
+    action_type: str  # "suggest_tags" | "merge_chunks"
+    mode: str  # "autonomous" | "review"
+    scope_mode: str  # "all" | "tags" | "id_range" | "untagged"
+    tag_ids: Optional[list[int]] = None
+    start_id: Optional[int] = None
+    end_id: Optional[int] = None
+    tag_strategy: Optional[str] = "batch"  # "per_chunk" | "batch" — ใช้เมื่อ action_type == suggest_tags
+    merge_strategy: Optional[str] = "embedding_prefilter"  # "all_pairs" | "embedding_prefilter"
+    similarity_threshold: Optional[float] = 0.85
+
+class ProposalApprove(BaseModel):
+    edited_tags: Optional[list[str]] = None      # ใช้กับ proposal ชนิด add_tags
+    edited_content: Optional[str] = None          # ใช้กับ proposal ชนิด merge
 
 class SecurityAnswerInput(BaseModel):
     question_id: int
@@ -1218,6 +1424,133 @@ def rollback_kb_snapshot_endpoint(snapshot_id: int, _: bool = Depends(require_lo
         raise HTTPException(status_code=404, detail="ไม่พบ snapshot นี้")
     rebuild_index()  # ข้อมูลเปลี่ยนไปทั้งชุด ต้องคำนวณ BM25/vector cache ใหม่ทั้งหมด
     return {"status": "rolled_back"}
+
+@app.post("/admin/api/agent/run")
+def run_agent_job(body: AgentJobStart, _: bool = Depends(require_login)):
+    """จุดเริ่มงาน AI Agent — สร้าง backup ก่อนเริ่มเสมอ (safety net หลัก) แล้วรันตาม
+    action_type/mode/scope/strategy ที่เลือกไว้ ถ้าเกิด error ระหว่างทาง บันทึกสถานะ 'failed'
+    ไว้ให้ admin เห็น พร้อมแนะนำ snapshot ที่ควร rollback กลับไป"""
+    chunks = _get_chunks_for_scope(body.scope_mode, body.tag_ids, body.start_id, body.end_id)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="ไม่พบ chunk ที่ตรงกับ scope ที่เลือก")
+
+    if body.action_type == "merge_chunks" and body.merge_strategy == "all_pairs" and len(chunks) > MAX_CHUNKS_FOR_ALL_PAIRS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"scope นี้มี {len(chunks)} chunk เกินขีดจำกัด {MAX_CHUNKS_FOR_ALL_PAIRS} ของโหมด 'เทียบทุกคู่ตรงๆ' "
+                "กรุณาแคบ scope ลง หรือเปลี่ยนไปใช้โหมด 'ใช้ embedding คัดกรองก่อน' แทน"
+            ),
+        )
+
+    # สร้าง backup ก่อนเริ่มงานเสมอ — safety net หลักของทั้งระบบ agent (ตกลงกันไว้ตั้งแต่ระยะ 2)
+    pre_snapshot_id = create_kb_snapshot(label=f"ก่อนรัน AI Agent ({body.action_type}/{body.mode})")
+    job_id = create_agent_job(
+        action_type=body.action_type, mode=body.mode,
+        scope_summary=f"{body.scope_mode} ({len(chunks)} chunk)",
+        pre_snapshot_id=pre_snapshot_id,
+    )
+
+    try:
+        if body.action_type == "suggest_tags":
+            existing_tags = [t["name"] for t in get_all_tags()]
+            proposals = []  # [{"chunk_id":, "suggested_tags":[...]}]
+
+            if body.tag_strategy == "per_chunk":
+                for c in chunks:
+                    suggested = suggest_tags_for_chunk(c["content"], existing_tags)
+                    if suggested:
+                        proposals.append({"chunk_id": c["id"], "suggested_tags": suggested})
+            else:  # "batch"
+                for i in range(0, len(chunks), TAG_BATCH_SIZE):
+                    batch = chunks[i:i + TAG_BATCH_SIZE]
+                    result = suggest_tags_for_batch(batch, existing_tags)
+                    for chunk_id, tags in result.items():
+                        if tags:
+                            proposals.append({"chunk_id": chunk_id, "suggested_tags": tags})
+
+            if body.mode == "autonomous":
+                for p in proposals:
+                    merged_tags = list(set(get_tags_for_chunk(p["chunk_id"]) + p["suggested_tags"]))
+                    set_tags_for_chunk(p["chunk_id"], merged_tags)
+                finish_agent_job(job_id, "completed", {"applied_count": len(proposals)})
+                return {"status": "completed", "job_id": job_id, "applied_count": len(proposals)}
+            else:  # "review"
+                for p in proposals:
+                    create_agent_proposal(job_id, "add_tags", p)
+                finish_agent_job(job_id, "awaiting_review", {"proposal_count": len(proposals)})
+                return {"status": "awaiting_review", "job_id": job_id, "proposal_count": len(proposals)}
+
+        elif body.action_type == "merge_chunks":
+            if body.merge_strategy == "all_pairs":
+                merge_groups = find_merge_candidates_all_pairs(chunks)
+            else:  # "embedding_prefilter"
+                merge_groups = find_merge_candidates_embedding_prefilter(chunks, threshold=body.similarity_threshold or 0.85)
+
+            if body.mode == "autonomous":
+                for g in merge_groups:
+                    apply_merge(g["chunk_ids"], g["merged_content"])
+                rebuild_index()
+                finish_agent_job(job_id, "completed", {"merged_count": len(merge_groups)})
+                return {"status": "completed", "job_id": job_id, "merged_count": len(merge_groups)}
+            else:  # "review"
+                for g in merge_groups:
+                    create_agent_proposal(job_id, "merge", g)
+                finish_agent_job(job_id, "awaiting_review", {"proposal_count": len(merge_groups)})
+                return {"status": "awaiting_review", "job_id": job_id, "proposal_count": len(merge_groups)}
+
+        else:
+            finish_agent_job(job_id, "failed", {"error": f"ไม่รู้จัก action_type: {body.action_type}"})
+            raise HTTPException(status_code=400, detail=f"ไม่รู้จัก action_type: {body.action_type}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        finish_agent_job(job_id, "failed", {"error": str(e)})
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agent ทำงานผิดพลาด: {e} — แนะนำกด Rollback ไปที่ backup #{pre_snapshot_id} เพื่อความปลอดภัย",
+        )
+
+@app.get("/admin/api/agent/jobs")
+def list_agent_jobs_endpoint(_: bool = Depends(require_login)):
+    """คืนประวัติงาน agent ล่าสุด 20 รายการ — แต่ละรายการมี pre_snapshot_id ให้กด rollback กลับได้ทันที"""
+    return {"jobs": get_agent_jobs()}
+
+@app.get("/admin/api/agent/proposals")
+def list_agent_proposals_endpoint(job_id: Optional[int] = None, _: bool = Depends(require_login)):
+    """คืนรายการข้อเสนอที่ยังไม่ได้ตัดสินใจ (status=pending) — ใช้ในโหมด review"""
+    return {"proposals": get_agent_proposals(job_id=job_id, status="pending")}
+
+@app.post("/admin/api/agent/proposals/{proposal_id}/approve")
+def approve_agent_proposal_endpoint(proposal_id: int, body: ProposalApprove, _: bool = Depends(require_login)):
+    """ยืนยันข้อเสนอ — ใช้เนื้อหาที่ admin แก้ไขแล้วถ้ามี ไม่งั้นใช้ตามที่ agent เสนอไว้เดิม"""
+    proposal = get_proposal_by_id(proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="ไม่พบ proposal นี้")
+    if proposal["status"] != "pending":
+        raise HTTPException(status_code=400, detail="proposal นี้ถูกจัดการไปแล้ว")
+
+    payload = proposal["payload"]
+    if proposal["proposal_type"] == "add_tags":
+        final_tags = body.edited_tags if body.edited_tags is not None else payload["suggested_tags"]
+        chunk_id = payload["chunk_id"]
+        merged_tags = list(set(get_tags_for_chunk(chunk_id) + final_tags))
+        set_tags_for_chunk(chunk_id, merged_tags)
+    elif proposal["proposal_type"] == "merge":
+        final_content = body.edited_content if body.edited_content is not None else payload["merged_content"]
+        apply_merge(payload["chunk_ids"], final_content)
+        rebuild_index()
+
+    update_proposal_status(proposal_id, "approved")
+    return {"status": "approved"}
+
+@app.post("/admin/api/agent/proposals/{proposal_id}/reject")
+def reject_agent_proposal_endpoint(proposal_id: int, _: bool = Depends(require_login)):
+    ok = update_proposal_status(proposal_id, "rejected")
+    if not ok:
+        raise HTTPException(status_code=404, detail="ไม่พบ proposal นี้")
+    return {"status": "rejected"}
 
 @app.get("/admin/api/kb")
 def list_kb(page: int = 1, page_size: int = 10, tag_ids: str = "", _: bool = Depends(require_login)):
