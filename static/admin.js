@@ -47,6 +47,7 @@ function switchTab(tab) {
         loadIdRangeHint();
         loadScopeTagList();
         updateScopePreview();
+        loadSnapshotList();
     }
 }
 
@@ -861,6 +862,87 @@ async function updateScopePreview() {
         countEl.textContent = data.count;
     } catch (error) {
         countEl.textContent = "เช็คไม่สำเร็จ";
+    }
+}
+
+// ---------- Backup / Rollback ----------
+async function loadSnapshotList() {
+    const container = document.getElementById("snapshotList");
+    try {
+        const res = await fetch("/admin/api/kb/snapshots");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+
+        if (data.snapshots.length === 0) {
+            container.innerHTML = "<p>ยังไม่มี backup เลย — กด \"สร้าง Backup ตอนนี้\" ด้านบนเพื่อเริ่มต้น</p>";
+            return;
+        }
+
+        container.innerHTML = "";
+        data.snapshots.forEach(snap => {
+            const row = document.createElement("div");
+            row.className = "snapshot-row";
+            const dateStr = snap.created_at ? new Date(snap.created_at).toLocaleString("th-TH") : "-";
+            row.innerHTML = `
+                <div class="snapshot-info">
+                    <strong>#${snap.id}</strong> — ${dateStr}<br>
+                    <span class="snapshot-meta">${escapeHtml(snap.label || "(ไม่มีป้ายกำกับ)")} · ${snap.chunk_count} chunk</span>
+                </div>
+                <button onclick="rollbackToSnapshot(${snap.id})" class="danger-btn">⏮️ Rollback ไปเวอร์ชันนี้</button>
+            `;
+            container.appendChild(row);
+        });
+    } catch (error) {
+        container.innerHTML = "<p style='color:red;'>โหลดรายการ backup ไม่สำเร็จ: " + escapeHtml(String(error)) + "</p>";
+    }
+}
+
+async function createKbSnapshot() {
+    const statusEl = document.getElementById("snapshotCreateStatus");
+    const label = prompt("ใส่ป้ายกำกับ backup นี้ (ไม่บังคับ เช่น 'ก่อนแก้หมวดภาษี')") || "";
+
+    statusEl.textContent = "กำลังสร้าง backup...";
+    statusEl.style.color = "#666";
+
+    try {
+        const res = await fetch("/admin/api/kb/snapshots", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ label })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+
+        statusEl.textContent = `✅ สร้าง backup #${data.id} สำเร็จ`;
+        statusEl.style.color = "green";
+        loadSnapshotList();
+    } catch (error) {
+        statusEl.textContent = "❌ สร้าง backup ไม่สำเร็จ: " + error;
+        statusEl.style.color = "red";
+    }
+}
+
+async function rollbackToSnapshot(snapshotId) {
+    const confirmed = confirm(
+        `⚠️⚠️ ยืนยัน Rollback กลับไปเป็น backup #${snapshotId}?\n\n` +
+        `การกระทำนี้จะ "ลบข้อมูล Knowledge Base ปัจจุบันทั้งหมดทิ้ง" แล้วแทนที่ด้วยข้อมูลใน backup นี้\n\n` +
+        `ระบบจะสร้าง backup ของสถานะปัจจุบันไว้ให้อัตโนมัติก่อน rollback (เผื่อ rollback ผิดเวอร์ชันจะย้อนกลับมาได้อีกที) ` +
+        `แต่ยืนยันก่อนว่าต้องการทำจริงๆ ใช่ไหม?`
+    );
+    if (!confirmed) return;
+
+    try {
+        const res = await fetch(`/admin/api/kb/snapshots/${snapshotId}/rollback`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || ("HTTP " + res.status));
+
+        alert("✅ Rollback สำเร็จแล้ว");
+        loadSnapshotList();
+        loadTagManagerList();
+        loadKbTagFilterList();
+        loadScopeTagList();
+    } catch (error) {
+        alert("❌ Rollback ไม่สำเร็จ: " + error);
     }
 }
 
