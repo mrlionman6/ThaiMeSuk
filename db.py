@@ -299,6 +299,111 @@ def get_all_tags() -> list[dict]:
         return [{"id": r[0], "name": r[1], "count": r[2]} for r in rows]
 
 
+def rename_tag(tag_id: int, new_name: str) -> bool:
+    """เปลี่ยนชื่อ tag — คืน False ถ้าไม่เจอ id หรือชื่อใหม่ซ้ำกับ tag อื่นที่มีอยู่แล้ว"""
+    new_name = new_name.strip()
+    with SessionLocal() as session:
+        row = session.get(Tag, tag_id)
+        if row is None:
+            return False
+        existing = session.query(Tag).filter(Tag.name == new_name, Tag.id != tag_id).first()
+        if existing:
+            return False  # ชื่อซ้ำกับ tag อื่น
+        row.name = new_name
+        session.commit()
+        return True
+
+
+def delete_tag_entirely(tag_id: int) -> bool:
+    """ลบ tag ออกจากทุก chunk ที่ผูกอยู่ทั้งหมด + ลบตัว tag เอง
+    (ON DELETE CASCADE ลบแถวใน knowledge_base_tags ที่เกี่ยวข้องให้อัตโนมัติ)"""
+    with SessionLocal() as session:
+        row = session.get(Tag, tag_id)
+        if row is None:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
+
+
+def remove_tag_from_chunk_range(tag_id: int, start_id: int, end_id: int) -> int:
+    """ลบ tag ออกจาก chunk เฉพาะที่ id อยู่ในช่วง [start_id, end_id] เท่านั้น (ไม่ลบตัว tag เอง)
+    คืนค่าจำนวนแถวที่ถูกลบจริง"""
+    with SessionLocal() as session:
+        rows = (
+            session.query(KnowledgeBaseTag)
+            .filter(
+                KnowledgeBaseTag.tag_id == tag_id,
+                KnowledgeBaseTag.chunk_id >= start_id,
+                KnowledgeBaseTag.chunk_id <= end_id,
+            )
+            .all()
+        )
+        count = len(rows)
+        for r in rows:
+            session.delete(r)
+        session.commit()
+        return count
+
+
+def add_tag_to_chunk_range(tag_name: str, start_id: int, end_id: int) -> int:
+    """เพิ่ม tag ให้ chunk ทุกตัวที่ id อยู่ในช่วง [start_id, end_id] (สร้าง tag ใหม่อัตโนมัติถ้ายังไม่มี)
+    ข้าม chunk ที่มี tag นี้ผูกอยู่แล้ว (กันซ้ำ) — คืนค่าจำนวน chunk ที่เพิ่มจริง"""
+    tag_id = get_or_create_tag(tag_name)
+    with SessionLocal() as session:
+        chunk_ids = [
+            r.id for r in session.query(KnowledgeBase.id)
+            .filter(KnowledgeBase.id >= start_id, KnowledgeBase.id <= end_id)
+            .all()
+        ]
+    added = 0
+    for chunk_id in chunk_ids:
+        with SessionLocal() as session:
+            existing = session.query(KnowledgeBaseTag).filter(
+                KnowledgeBaseTag.chunk_id == chunk_id, KnowledgeBaseTag.tag_id == tag_id
+            ).first()
+            if not existing:
+                session.add(KnowledgeBaseTag(chunk_id=chunk_id, tag_id=tag_id))
+                session.commit()
+                added += 1
+    return added
+
+
+def get_chunk_id_range() -> dict:
+    """คืนค่า id ต่ำสุด/สูงสุดปัจจุบันของ knowledge_base — ใช้ทำ placeholder/validation ใน UI ตอนกรอกช่วง id"""
+    with SessionLocal() as session:
+        result = session.query(func.min(KnowledgeBase.id), func.max(KnowledgeBase.id)).first()
+        return {"min_id": result[0], "max_id": result[1]}
+
+
+def count_knowledge_base_by_scope(
+    tag_ids: Optional[list[int]] = None,
+    untagged: bool = False,
+    start_id: Optional[int] = None,
+    end_id: Optional[int] = None,
+) -> int:
+    """นับจำนวน chunk ที่ตรงกับเงื่อนไข scope ที่ระบุ — ใช้ทำ live preview ตอนตั้งค่า filter
+    ก่อนสั่งงานจริง (ทั้งงาน bulk tag ธรรมดาตอนนี้ และงาน agent ในระยะถัดไป)"""
+    with SessionLocal() as session:
+        q = session.query(KnowledgeBase.id)
+        if start_id is not None:
+            q = q.filter(KnowledgeBase.id >= start_id)
+        if end_id is not None:
+            q = q.filter(KnowledgeBase.id <= end_id)
+        if untagged:
+            q = (
+                q.outerjoin(KnowledgeBaseTag, KnowledgeBaseTag.chunk_id == KnowledgeBase.id)
+                .filter(KnowledgeBaseTag.id.is_(None))
+            )
+        elif tag_ids:
+            q = (
+                q.join(KnowledgeBaseTag, KnowledgeBaseTag.chunk_id == KnowledgeBase.id)
+                .filter(KnowledgeBaseTag.tag_id.in_(tag_ids))
+                .distinct()
+            )
+        return q.count()
+
+
 def add_knowledge_chunk(content: str, embedding: Optional[list[float]] = None) -> int:
     """เพิ่ม chunk ใหม่ (ตอน admin approve) — คืนค่า id ที่เพิ่ง insert
     ถ้าไม่ส่ง embedding มา จะถูก backfill ให้เองตอน rebuild_index() รอบถัดไป"""
