@@ -10,6 +10,12 @@ from db import (
     set_tags_for_chunk,
     get_tags_for_chunk,
     get_all_tags,
+    rename_tag,
+    delete_tag_entirely,
+    remove_tag_from_chunk_range,
+    add_tag_to_chunk_range,
+    get_chunk_id_range,
+    count_knowledge_base_by_scope,
     get_chunks_missing_embeddings,
     set_embedding,
     get_vector_scores_for_all,
@@ -659,6 +665,18 @@ class KBCreate(BaseModel):
     content: str
     tags: Optional[list[str]] = None
 
+class TagRename(BaseModel):
+    name: str
+
+class TagRangeRemove(BaseModel):
+    start_id: int
+    end_id: int
+
+class TagRangeAdd(BaseModel):
+    tag_name: str
+    start_id: int
+    end_id: int
+
 class SecurityAnswerInput(BaseModel):
     question_id: int
     answer: str
@@ -1113,6 +1131,62 @@ def reject_log(action: LogAction, _: bool = Depends(require_login)):
 def list_tags(_: bool = Depends(require_login)):
     """คืนรายการ tag ทั้งหมดพร้อมจำนวน chunk ที่ผูกอยู่ — ใช้ทำ dropdown ตัวกรองในหน้า admin"""
     return {"tags": get_all_tags()}
+
+@app.put("/admin/api/tags/{tag_id}")
+def rename_tag_endpoint(tag_id: int, body: TagRename, _: bool = Depends(require_login)):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="ชื่อ tag ห้ามว่างเปล่า")
+    ok = rename_tag(tag_id, name)
+    if not ok:
+        raise HTTPException(status_code=400, detail="เปลี่ยนชื่อไม่สำเร็จ (ไม่พบ tag นี้ หรือชื่อซ้ำกับ tag อื่นที่มีอยู่แล้ว)")
+    return {"status": "renamed"}
+
+@app.delete("/admin/api/tags/{tag_id}")
+def delete_tag_endpoint(tag_id: int, _: bool = Depends(require_login)):
+    """ลบ tag นี้ออกจากทุก chunk ทั้งหมดในระบบ + ลบตัว tag เอง (reversible แค่เพิ่ม tag ชื่อเดิมกลับเข้าไปใหม่เอง)"""
+    ok = delete_tag_entirely(tag_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="ไม่พบ tag นี้")
+    return {"status": "deleted"}
+
+@app.post("/admin/api/tags/{tag_id}/remove-range")
+def remove_tag_range_endpoint(tag_id: int, body: TagRangeRemove, _: bool = Depends(require_login)):
+    """ลบ tag ออกจาก chunk เฉพาะช่วง id ที่ระบุ (ไม่ลบตัว tag เอง ไม่กระทบ chunk นอกช่วง)"""
+    if body.start_id > body.end_id:
+        raise HTTPException(status_code=400, detail="ช่วง id ไม่ถูกต้อง (start_id ต้องน้อยกว่าหรือเท่ากับ end_id)")
+    count = remove_tag_from_chunk_range(tag_id, body.start_id, body.end_id)
+    return {"status": "removed", "count": count}
+
+@app.post("/admin/api/tags/add-range")
+def add_tag_range_endpoint(body: TagRangeAdd, _: bool = Depends(require_login)):
+    """เพิ่ม tag ให้ chunk ทุกตัวในช่วง id ที่ระบุ (สร้าง tag ใหม่อัตโนมัติถ้ายังไม่มี)"""
+    name = body.tag_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="ชื่อ tag ห้ามว่างเปล่า")
+    if body.start_id > body.end_id:
+        raise HTTPException(status_code=400, detail="ช่วง id ไม่ถูกต้อง (start_id ต้องน้อยกว่าหรือเท่ากับ end_id)")
+    count = add_tag_to_chunk_range(name, body.start_id, body.end_id)
+    return {"status": "added", "count": count}
+
+@app.get("/admin/api/kb/id-range")
+def get_kb_id_range(_: bool = Depends(require_login)):
+    """คืน id ต่ำสุด/สูงสุดปัจจุบันของ KB — ใช้เป็น placeholder/validation ในฟอร์มกรอกช่วง id"""
+    return get_chunk_id_range()
+
+@app.get("/admin/api/kb/scope-count")
+def get_kb_scope_count(
+    tag_ids: str = "",
+    untagged: bool = False,
+    start_id: Optional[int] = None,
+    end_id: Optional[int] = None,
+    _: bool = Depends(require_login),
+):
+    """นับจำนวน chunk ที่ตรงกับ scope ที่เลือกไว้ในตัวกรอง — ใช้ทำ live preview ก่อนกดยืนยันทำงานจริง
+    (ทั้งงาน bulk tag ตอนนี้ และงาน agent ในระยะถัดไปที่จะใช้ scope filter ชุดเดียวกันนี้)"""
+    parsed_tag_ids = [int(t) for t in tag_ids.split(",") if t.strip().isdigit()] if tag_ids else None
+    count = count_knowledge_base_by_scope(tag_ids=parsed_tag_ids, untagged=untagged, start_id=start_id, end_id=end_id)
+    return {"count": count}
 
 @app.get("/admin/api/kb")
 def list_kb(page: int = 1, page_size: int = 10, tag_ids: str = "", _: bool = Depends(require_login)):
