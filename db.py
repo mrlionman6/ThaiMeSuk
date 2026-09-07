@@ -13,6 +13,7 @@ db.py — เลเยอร์เชื่อมต่อ PostgreSQL สำห�
         get_all_knowledge_base_for_export,
         add_knowledge_chunk, update_knowledge_chunk, delete_knowledge_chunk,
         get_or_create_tag, set_tags_for_chunk, get_tags_for_chunk, get_all_tags,
+        create_kb_snapshot, get_kb_snapshots, rollback_to_snapshot,
         get_chunks_missing_embeddings, set_embedding, get_vector_scores_for_all,
         get_logs, get_logs_paginated, log_low_confidence_query, approve_log, reject_log,
         create_user, get_user_by_username, get_user_by_id, update_user_password,
@@ -70,6 +71,17 @@ class KnowledgeBaseTag(Base):
     id = Column(Integer, primary_key=True)
     chunk_id = Column(Integer, ForeignKey("knowledge_base.id", ondelete="CASCADE"), nullable=False, index=True)
     tag_id = Column(Integer, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False, index=True)
+
+
+class KbSnapshot(Base):
+    """เก็บภาพรวมของ KB ทั้งหมด (เนื้อหา+embedding+tags) ณ จุดเวลาหนึ่ง — ใช้ทำ backup/rollback
+    เก็บแค่ MAX_KB_SNAPSHOTS เวอร์ชันล่าสุด (rolling window) ไม่เก็บไม่จำกัดจำนวน กัน DB บวม"""
+    __tablename__ = "kb_snapshots"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+    label = Column(String, nullable=True)  # เหตุผล/ป้ายกำกับ เช่น "ก่อนรัน AI Agent ยุบรวม chunk"
+    data = Column(JSON, nullable=False)  # {"chunks": [{"id":, "content":, "embedding":[...], "tags":[...]}, ...]}
 
 
 class Log(Base):
@@ -402,6 +414,99 @@ def count_knowledge_base_by_scope(
                 .distinct()
             )
         return q.count()
+
+
+# ---------- Backup / Rollback (kb_snapshots) ----------
+MAX_KB_SNAPSHOTS = 2  # เก็บแค่เวอร์ชันล่าสุด N อัน (rolling window) ตามที่ตกลงกันไว้ — ลบเก่าสุดทิ้งอัตโนมัติถ้าเกิน
+
+
+def create_kb_snapshot(label: str = "") -> int:
+    """ถ่ายภาพ KB ทั้งหมด (เนื้อหา+embedding+tags) ณ ตอนนี้เก็บไว้เป็น snapshot ใหม่
+    เก็บแค่ MAX_KB_SNAPSHOTS เวอร์ชันล่าสุด คืนค่า snapshot id ที่เพิ่งสร้าง"""
+    with SessionLocal() as session:
+        chunks = session.query(KnowledgeBase).order_by(KnowledgeBase.id).all()
+        chunk_data = []
+        for c in chunks:
+            tags = get_tags_for_chunk(c.id)
+            embedding_list = list(c.embedding) if c.embedding is not None else None
+            chunk_data.append({"id": c.id, "content": c.content, "embedding": embedding_list, "tags": tags})
+
+        snapshot = KbSnapshot(label=label, data={"chunks": chunk_data})
+        session.add(snapshot)
+        session.commit()
+        session.refresh(snapshot)
+        new_id = snapshot.id
+
+        # ลบเก่าสุดทิ้งถ้าเกิน MAX_KB_SNAPSHOTS (rolling window)
+        all_snapshots = session.query(KbSnapshot).order_by(KbSnapshot.created_at.desc()).all()
+        if len(all_snapshots) > MAX_KB_SNAPSHOTS:
+            for old in all_snapshots[MAX_KB_SNAPSHOTS:]:
+                session.delete(old)
+            session.commit()
+
+        return new_id
+
+
+def get_kb_snapshots() -> list[dict]:
+    """คืนรายการ snapshot ทั้งหมด (แค่ metadata ไม่ส่งข้อมูลเต็มกลับ กันโหลดหนัก) เรียงใหม่สุดก่อน"""
+    with SessionLocal() as session:
+        rows = session.query(KbSnapshot).order_by(KbSnapshot.created_at.desc()).all()
+        return [
+            {
+                "id": r.id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "label": r.label,
+                "chunk_count": len(r.data.get("chunks", [])) if r.data else 0,
+            }
+            for r in rows
+        ]
+
+
+def rollback_to_snapshot(snapshot_id: int) -> bool:
+    """ล้าง KB ปัจจุบันทั้งหมด แล้ว restore กลับไปเป็นเวอร์ชันใน snapshot ที่ระบุ (คืน id เดิมเป๊ะทุกตัว)
+    คืนค่า False ถ้าไม่พบ snapshot นี้ — caller ควรสร้าง snapshot ของสถานะปัจจุบันไว้ก่อนเรียกฟังก์ชันนี้เสมอ
+    (เผื่ออยาก 'ย้อนกลับการ rollback' ได้อีกที ถ้า rollback ผิดเวอร์ชัน)"""
+    with SessionLocal() as session:
+        snapshot = session.get(KbSnapshot, snapshot_id)
+        if snapshot is None:
+            return False
+        chunks_data = snapshot.data.get("chunks", [])
+
+    # ขั้น 1: ลบข้อมูลปัจจุบันทั้งหมด (tags ถูกลบตาม CASCADE เมื่อลบ knowledge_base rows)
+    with SessionLocal() as session:
+        session.query(KnowledgeBaseTag).delete()
+        session.query(KnowledgeBase).delete()
+        session.commit()
+
+    # ขั้น 2: restore เนื้อหา+embedding กลับเข้าไปตรง id เดิมเป๊ะ
+    with SessionLocal() as session:
+        for c in chunks_data:
+            session.add(KnowledgeBase(id=c["id"], content=c["content"], embedding=c.get("embedding")))
+        session.commit()
+
+    # ขั้น 3: เตรียม tag ทั้งหมดที่ต้องใช้ก่อน (get_or_create_tag มี session ของตัวเอง เรียกแยกนอก session หลักปลอดภัยกว่า)
+    tag_name_to_id = {}
+    for c in chunks_data:
+        for tag_name in c.get("tags") or []:
+            if tag_name not in tag_name_to_id:
+                tag_name_to_id[tag_name] = get_or_create_tag(tag_name)
+
+    # ขั้น 4: ผูก tag กลับเข้า chunk ตามเดิม
+    with SessionLocal() as session:
+        for c in chunks_data:
+            for tag_name in c.get("tags") or []:
+                session.add(KnowledgeBaseTag(chunk_id=c["id"], tag_id=tag_name_to_id[tag_name]))
+        session.commit()
+
+    # ขั้น 5: sync sequence กัน id ชนกับ auto-increment รอบถัดไป
+    with engine.connect() as conn:
+        conn.execute(text(
+            "SELECT setval(pg_get_serial_sequence('knowledge_base', 'id'), "
+            "GREATEST((SELECT MAX(id) FROM knowledge_base), 1))"
+        ))
+        conn.commit()
+
+    return True
 
 
 def add_knowledge_chunk(content: str, embedding: Optional[list[float]] = None) -> int:
