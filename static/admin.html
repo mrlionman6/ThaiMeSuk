@@ -27,6 +27,9 @@
         <button id="tabBtnTags" class="tab-btn" onclick="switchTab('tags')">
             🏷️ จัดการ Tag
         </button>
+        <button id="tabBtnAgent" class="tab-btn" onclick="switchTab('agent')">
+            🤖 AI Agent KB Management
+        </button>
     </div>
 
     <div id="tabPending" class="tab-panel">
@@ -114,11 +117,30 @@
             </div>
         </details>
 
-        <!-- ส่วนที่ 3: Scope filter ละเอียด — ใช้ preview ตอนนี้ และเตรียมไว้ให้ AI Agent ใช้ในระยะถัดไป -->
+        <!-- ส่วนที่ 4: Backup / Rollback — ต้องมีก่อนให้ AI Agent แตะข้อมูลจริง -->
         <details class="kb-toolbar-section">
-            <summary>🎯 กำหนดขอบเขต (Scope) — เตรียมไว้สำหรับ AI Agent ในระยะถัดไป</summary>
+            <summary>💾 Backup & Rollback</summary>
             <div class="kb-toolbar-body">
-                <p class="ts-note">เลือกขอบเขตที่จะทำงานด้วย — เลือก "ทั้งหมด" จะปิดตัวเลือกอื่นอัตโนมัติ (กันเลือกขัดแย้งกัน)</p>
+                <p class="ts-note">เก็บ backup ล่าสุดไว้ 5 เวอร์ชัน (เวอร์ชันเก่าสุดถูกลบทิ้งอัตโนมัติเมื่อสร้างใหม่เกิน 5 อัน)</p>
+                <button onclick="createKbSnapshot()">📸 สร้าง Backup ตอนนี้</button>
+                <span id="snapshotCreateStatus" class="kb-toolbar-status"></span>
+                <div id="snapshotList" style="margin-top:12px;">กำลังโหลด...</div>
+            </div>
+        </details>
+    </div>
+
+    <div id="tabAgent" class="tab-panel" style="display:none;">
+
+        <div class="agent-warning-banner">
+            ⚠️ <strong>มีความเสี่ยง</strong> — เครื่องมือในแท็บนี้แก้ไขข้อมูลใน Knowledge Base จริง
+            (เพิ่ม/ลบ tag, ยุบรวม chunk) กรุณาทำตามลำดับขั้นตอนที่ 1-3 ด้านล่าง และสร้าง Backup ก่อนเริ่มทำงานเสมอ
+        </div>
+
+        <!-- ขั้นตอนที่ 1: Scope filter ละเอียด -->
+        <details class="kb-toolbar-section">
+            <summary>🎯 ขั้นตอนที่ 1: กำหนดขอบเขต (Scope)</summary>
+            <div class="kb-toolbar-body">
+                <p class="ts-note">เลือกขอบเขตที่ Agent จะทำงานด้วย — เลือก "ทั้งหมด" จะปิดตัวเลือกอื่นอัตโนมัติ (กันเลือกขัดแย้งกัน)</p>
 
                 <label class="scope-option">
                     <input type="radio" name="scopeMode" value="all" checked onchange="onScopeModeChange()">
@@ -147,21 +169,12 @@
                 <p class="scope-preview">📊 ตรงกับ <strong id="scopePreviewCount">-</strong> รายการ</p>
             </div>
         </details>
-        <!-- ส่วนที่ 4: Backup / Rollback — ต้องมีก่อนให้ AI Agent แตะข้อมูลจริงในระยะถัดไป -->
+
+        <!-- ขั้นตอนที่ 2: AI Agent -->
         <details class="kb-toolbar-section">
-            <summary>💾 Backup & Rollback</summary>
+            <summary>🤖 ขั้นตอนที่ 2: AI Agent</summary>
             <div class="kb-toolbar-body">
-                <p class="ts-note">เก็บ backup ล่าสุดไว้ 2 เวอร์ชัน (เวอร์ชันเก่าสุดถูกลบทิ้งอัตโนมัติเมื่อสร้างใหม่เกิน 2 อัน)</p>
-                <button onclick="createKbSnapshot()">📸 สร้าง Backup ตอนนี้</button>
-                <span id="snapshotCreateStatus" class="kb-toolbar-status"></span>
-                <div id="snapshotList" style="margin-top:12px;">กำลังโหลด...</div>
-            </div>
-        </details>
-        <!-- ส่วนที่ 5: AI Agent — ใช้ scope จากกล่องด้านบน ต้องอ่านคำเตือนก่อนใช้ -->
-        <details class="kb-toolbar-section">
-            <summary>🤖 AI Agent (มีความเสี่ยง — อ่านคำเตือนก่อนใช้)</summary>
-            <div class="kb-toolbar-body">
-                <p class="ts-note">Agent จะทำงานภายในขอบเขต (Scope) ที่ตั้งไว้ในกล่อง "🎯 กำหนดขอบเขต" ด้านบน — ตั้ง scope ก่อนมาที่นี่ ดูจำนวนที่ตรง scope ได้จากกล่องด้านบน</p>
+                <p class="ts-note">Agent จะทำงานภายในขอบเขต (Scope) ที่ตั้งไว้ในขั้นตอนที่ 1 ด้านบน</p>
 
                 <p class="modal-section-label" style="margin-top:0;">1. เลือกงานที่จะให้ Agent ทำ</p>
                 <label class="scope-option">
@@ -194,15 +207,15 @@
             </div>
         </details>
 
-        <!-- ส่วนที่ 6: Review Queue -->
+        <!-- ขั้นตอนที่ 3: Review Queue -->
         <details class="kb-toolbar-section" open>
-            <summary>📋 รายการรอตรวจสอบจาก Agent (Review Queue)</summary>
+            <summary>📋 ขั้นตอนที่ 3: รายการรอตรวจสอบจาก Agent (Review Queue)</summary>
             <div class="kb-toolbar-body">
                 <div id="agentProposalList">กำลังโหลด...</div>
             </div>
         </details>
 
-        <!-- ส่วนที่ 7: ประวัติการทำงาน -->
+        <!-- ประวัติการทำงาน (ไม่ใช่ขั้นตอนที่ต้องทำ แค่ log ไว้ดูย้อนหลัง) -->
         <details class="kb-toolbar-section">
             <summary>📜 ประวัติการทำงานของ Agent</summary>
             <div class="kb-toolbar-body">
