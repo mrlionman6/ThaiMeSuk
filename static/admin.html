@@ -176,33 +176,37 @@
             <div class="kb-toolbar-body">
                 <p class="ts-note">Agent จะทำงานภายในขอบเขต (Scope) ที่ตั้งไว้ในขั้นตอนที่ 1 ด้านบน</p>
 
-                <p class="modal-section-label" style="margin-top:0;">1. เลือกงานที่จะให้ Agent ทำ</p>
-                <label class="scope-option">
-                    <input type="radio" name="agentAction" value="suggest_tags" checked onchange="onAgentActionChange()">
-                    เสนอ/เพิ่ม Tag อัตโนมัติ
-                </label>
-                <label class="scope-option">
-                    <input type="radio" name="agentAction" value="merge_chunks" onchange="onAgentActionChange()">
-                    หา chunk ที่ควรยุบรวม
-                </label>
+                <div class="agent-question-group">
+                    <p class="modal-section-label" style="margin-top:0;">1. เลือกงานที่จะให้ Agent ทำ</p>
+                    <label class="scope-option">
+                        <input type="radio" name="agentAction" value="suggest_tags" checked onchange="onAgentActionChange()">
+                        เสนอ/เพิ่ม Tag อัตโนมัติ
+                    </label>
+                    <label class="scope-option">
+                        <input type="radio" name="agentAction" value="merge_chunks" onchange="onAgentActionChange()">
+                        หา chunk ที่ควรยุบรวม
+                    </label>
 
-                <div id="agentTagOptions" style="margin:8px 0 8px 24px;">
-                    <p class="modal-section-label">รูปแบบการดู chunk</p>
-                    <label class="scope-option"><input type="radio" name="tagStrategy" value="batch" checked> ดูหลาย chunk พร้อมกัน (เร็วกว่า)</label>
-                    <label class="scope-option"><input type="radio" name="tagStrategy" value="per_chunk"> ดูทีละ chunk แยกกัน (ช้ากว่า แม่นกว่า)</label>
+                    <div id="agentTagOptions" class="agent-sub-box">
+                        <p class="modal-section-label" style="margin-top:0;">รูปแบบการดู chunk</p>
+                        <label class="scope-option"><input type="radio" name="tagStrategy" value="batch" checked> ดูหลาย chunk พร้อมกัน (เร็วกว่า)</label>
+                        <label class="scope-option"><input type="radio" name="tagStrategy" value="per_chunk"> ดูทีละ chunk แยกกัน (ช้ากว่า แม่นกว่า)</label>
+                    </div>
+
+                    <div id="agentMergeOptions" class="agent-sub-box" style="display:none;">
+                        <p class="modal-section-label" style="margin-top:0;">วิธีหาคู่ที่ควรรวม</p>
+                        <label class="scope-option"><input type="radio" name="mergeStrategy" value="embedding_prefilter" checked> ใช้ embedding คัด candidate ก่อน (เร็ว/ถูกกว่า)</label>
+                        <label class="scope-option"><input type="radio" name="mergeStrategy" value="all_pairs"> เทียบทุกคู่ตรงๆ (แม่นกว่า จำกัดไม่เกิน 40 chunk/รอบ)</label>
+                    </div>
                 </div>
 
-                <div id="agentMergeOptions" style="display:none; margin:8px 0 8px 24px;">
-                    <p class="modal-section-label">วิธีหาคู่ที่ควรรวม</p>
-                    <label class="scope-option"><input type="radio" name="mergeStrategy" value="embedding_prefilter" checked> ใช้ embedding คัด candidate ก่อน (เร็ว/ถูกกว่า)</label>
-                    <label class="scope-option"><input type="radio" name="mergeStrategy" value="all_pairs"> เทียบทุกคู่ตรงๆ (แม่นกว่า จำกัดไม่เกิน 40 chunk/รอบ)</label>
+                <div class="agent-question-group agent-question-group-last">
+                    <p class="modal-section-label" style="margin-top:0;">2. เลือกโหมดการทำงาน</p>
+                    <label class="scope-option"><input type="radio" name="agentMode" value="review" checked> Review — เสนอให้ดูก่อน แก้ไขได้ ค่อยยืนยันทีละอัน</label>
+                    <label class="scope-option"><input type="radio" name="agentMode" value="autonomous"> Autonomous — ทำงานอัตโนมัติทั้งหมดทันที</label>
                 </div>
 
-                <p class="modal-section-label">2. เลือกโหมดการทำงาน</p>
-                <label class="scope-option"><input type="radio" name="agentMode" value="review" checked> Review — เสนอให้ดูก่อน แก้ไขได้ ค่อยยืนยันทีละอัน</label>
-                <label class="scope-option"><input type="radio" name="agentMode" value="autonomous"> Autonomous — ทำงานอัตโนมัติทั้งหมดทันที</label>
-
-                <button onclick="startAgentJob()" class="danger-btn" style="margin-top:12px;">🚀 เริ่มทำงาน</button>
+                <button onclick="startAgentJob()" class="danger-btn" style="margin-top:4px;">🚀 เริ่มทำงาน</button>
                 <span id="agentRunStatus" class="kb-toolbar-status"></span>
             </div>
         </details>
