@@ -446,7 +446,7 @@ def count_knowledge_base_by_scope(
 
 
 # ---------- Backup / Rollback (kb_snapshots) ----------
-MAX_KB_SNAPSHOTS = 2  # เก็บแค่เวอร์ชันล่าสุด N อัน (rolling window) ตามที่ตกลงกันไว้ — ลบเก่าสุดทิ้งอัตโนมัติถ้าเกิน
+MAX_KB_SNAPSHOTS = 5  # เก็บแค่เวอร์ชันล่าสุด N อัน (rolling window) — ขยายจาก 2 เป็น 5 ตามที่ขอ
 
 
 def create_kb_snapshot(label: str = "") -> int:
