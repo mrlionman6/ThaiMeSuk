@@ -21,6 +21,15 @@ input {
     font-size: 16px;
 }
 
+/* กฎ input{} ด้านบนตั้งใจไว้สำหรับช่องพิมพ์คำถามหน้าเว็บหลักเท่านั้น แต่เพราะเขียนแบบไม่เจาะจง type
+   เลยครอบไปโดน radio/checkbox ทุกจุดในหน้า admin ด้วย (ทำให้ radio ยืดเป็น 70% ของแถวจนพัง)
+   override เฉพาะ 2 type นี้กลับไปเป็นขนาดธรรมชาติ ด้วย selector ที่เจาะจงกว่าเดิม (ชนะ specificity) */
+input[type="radio"],
+input[type="checkbox"] {
+    width: auto;
+    padding: 0;
+}
+
 .app-footnote {
     text-align: center;
     font-size: 13px;
@@ -969,7 +978,9 @@ button {
 }
 
 .scope-option {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 14px;
     margin: 8px 0 4px;
     cursor: pointer;
@@ -979,6 +990,28 @@ button {
     display: none; /* ซ่อนไว้ก่อน onScopeModeChange() จะสั่งโชว์เฉพาะอันที่ตรงกับโหมดที่เลือก */
     margin-left: 24px;
     margin-bottom: 8px;
+}
+
+/* จัดกลุ่มคำถามแต่ละข้อในแท็บ AI Agent ให้แยกกันชัดเจนด้วยเส้นคั่น + spacing ที่อ่านง่ายขึ้น */
+.agent-question-group {
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid #eee;
+}
+
+.agent-question-group-last {
+    border-bottom: none;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+}
+
+/* sub-box ของตัวเลือกที่ต้องกรอกเพิ่ม (เช่น "รูปแบบการดู chunk") — ย่อหน้าลงมาใต้ตัวเลือกหลักชัดเจน */
+.agent-sub-box {
+    margin: 6px 0 8px 26px;
+    padding: 10px 14px;
+    background: #f9f9f9;
+    border-radius: 6px;
+    border-left: 3px solid #ddd;
 }
 
 .scope-preview {
