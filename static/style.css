@@ -1008,3 +1008,15 @@ button {
     color: #888;
     font-size: 12px;
 }
+
+/* ---------- Admin: คำเตือนความเสี่ยงในแท็บ AI Agent KB Management ---------- */
+.agent-warning-banner {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #664d03;
+}
