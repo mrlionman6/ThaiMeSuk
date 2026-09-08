@@ -26,12 +26,14 @@ function switchTab(tab) {
     document.getElementById("tabUserRequests").style.display = tab === "userRequests" ? "block" : "none";
     document.getElementById("tabUsers").style.display = tab === "users" ? "block" : "none";
     document.getElementById("tabTags").style.display = tab === "tags" ? "block" : "none";
+    document.getElementById("tabAgent").style.display = tab === "agent" ? "block" : "none";
 
     document.getElementById("tabBtnPending").classList.toggle("tab-btn-active", tab === "pending");
     document.getElementById("tabBtnKb").classList.toggle("tab-btn-active", tab === "kb");
     document.getElementById("tabBtnUserRequests").classList.toggle("tab-btn-active", tab === "userRequests");
     document.getElementById("tabBtnUsers").classList.toggle("tab-btn-active", tab === "users");
     document.getElementById("tabBtnTags").classList.toggle("tab-btn-active", tab === "tags");
+    document.getElementById("tabBtnAgent").classList.toggle("tab-btn-active", tab === "agent");
 
     if (tab === "pending") {
         loadLogs(pendingPage);
@@ -45,9 +47,10 @@ function switchTab(tab) {
     } else if (tab === "tags") {
         loadTagManagerList();
         loadIdRangeHint();
+        loadSnapshotList();
+    } else if (tab === "agent") {
         loadScopeTagList();
         updateScopePreview();
-        loadSnapshotList();
         loadAgentProposals();
         loadAgentJobList();
     }
