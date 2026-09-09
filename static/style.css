@@ -20,7 +20,7 @@
 
 body.page-main-BG {
     background-image: url('/static/Graphic/bg-main.png');
-    background-size: contain;        /* ภาพเต็มจอ ไม่บิดเบี้ยว */
+    background-size: auto;        /* ภาพเต็มจอ ไม่บิดเบี้ยว */
     background-position: center;   /* จุดกึ่งกลางภาพอยู่ตรงกลางจอเสมอ */
     background-attachment: fixed;  /* ภาพไม่เลื่อนตามตอน scroll (ไม่บังคับ ลองดูได้) */
     background-repeat: no-repeat;
