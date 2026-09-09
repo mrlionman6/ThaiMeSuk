@@ -7,14 +7,15 @@
 /* ---------- Palette: จากโทนที่เลือกไว้ (ครีม-พีช-ฟ้าอ่อน-ฟ้าเข้ม) ----------
    ใช้ variable กลางจุดเดียว แก้สีทีหลังได้ง่ายไม่ต้องไล่หาทั้งไฟล์ */
 :root {
-    --color-cream: #FCF6D3;
+    --color-cream: #FFF9D2;
     --color-cream-text: #6B5A1E;
-    --color-peach: #FCE4C6;
+    --color-peach: #FFEBCC;
     --color-peach-text: #7A4A15;
-    --color-sky-pale: #C6E3F5;
+    --color-sky-pale: #BFDDF0;
     --color-sky-pale-text: #204A6B;
-    --color-primary: #3878AE;      /* ปุ่มหลัก, ลิงก์, แท็บ active — เข้มพอให้ตัวอักษรขาวผ่าน WCAG AA (4.7:1) ยังอยู่โทนฟ้าเดียวกับต้นฉบับ (#82BFEA) */
-    --color-primary-hover: #2F6B9E;
+    --color-sky: #8CC0EB;          /* โทนฟ้ากลางตามที่ให้มาเป๊ะ — ใช้กับพื้นหลังกล่อง/เส้นขอบ ไม่ใช้กับตัวอักษรขาว (contrast ไม่พอ) */
+    --color-primary: #2E75AF;      /* เข้มขึ้นจาก --color-sky เพื่อให้ตัวอักษรขาวอ่านออกผ่าน WCAG AA (4.91:1) */
+    --color-primary-hover: #255F8F;
 }
 
 body {
@@ -32,6 +33,14 @@ input {
     width: 70%;
     padding: 10px;
     font-size: 16px;
+    border: 2px solid var(--color-sky-pale);
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+
+input:focus {
+    outline: none;
+    border-color: var(--color-sky);
 }
 
 /* กฎ input{} ด้านบนตั้งใจไว้สำหรับช่องพิมพ์คำถามหน้าเว็บหลักเท่านั้น แต่เพราะเขียนแบบไม่เจาะจง type
@@ -41,19 +50,26 @@ input[type="radio"],
 input[type="checkbox"] {
     width: auto;
     padding: 0;
+    border: none; /* กัน border ใหม่ที่เพิ่มให้ input{} ทำให้ radio/checkbox เสียรูปทรงธรรมชาติซ้ำแบบเดิม */
 }
 
 .app-footnote {
     text-align: center;
     font-size: 13px;
-    color: #888;
+    color: var(--color-cream-text);
+    background: var(--color-cream);
+    border-radius: 8px;
+    padding: 10px 14px;
     margin-top: 14px;
     line-height: 1.5;
 }
 
 .page-title {
     text-align: center;
-    color: var(--color-primary);
+    color: var(--color-cream-text);
+    background: var(--color-cream);
+    border-radius: 12px;
+    padding: 14px 16px;
     white-space: nowrap; /* ห้ามตัดขึ้นบรรทัดใหม่แม้จอแคบ */
     overflow: hidden;
     /* ย่อขนาดตัวอักษรตามความกว้างจอแทนการตัดคำ กันล้นขอบจอตอนจอแคบมากๆ
@@ -120,7 +136,7 @@ input[type="checkbox"] {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: #f4f4f4;
+    background: var(--color-peach);
     border-radius: 6px;
     padding: 6px 12px;
     margin-top: 8px;
@@ -160,7 +176,7 @@ button {
     max-height: calc(100vh - 260px);
     min-height: 300px;
     overflow-y: auto;
-    border: 1px solid #eee;
+    border: 2px solid var(--color-sky-pale);
     border-radius: 8px;
     padding: 14px;
     box-sizing: border-box;
@@ -227,7 +243,8 @@ button {
 
 /* ---------- Admin: การ์ดรายการ (ใช้ทั้งแท็บ pending และ kb) ---------- */
 .card {
-    border: 1px solid #ddd;
+    background: var(--color-peach);
+    border: 1px solid #f0d4a8;
     padding: 15px;
     margin-bottom: 15px;
     border-radius: 8px;
@@ -364,7 +381,8 @@ button {
 }
 
 .kb-toolbar-section {
-    border: 1px solid #ddd;
+    background: var(--color-sky-pale);
+    border: 1px solid var(--color-sky);
     border-radius: 8px;
     margin-bottom: 8px;
     padding: 10px 15px;
@@ -437,8 +455,8 @@ button {
     left: 0;
     height: 100%;
     width: 260px;
-    background: #fff;
-    border-right: 1px solid #ddd;
+    background: var(--color-sky-pale);
+    border-right: 2px solid var(--color-sky);
     z-index: 25;
     display: flex;
     flex-direction: column;
@@ -621,8 +639,8 @@ button {
 }
 
 .chat-msg-assistant {
-    background: #fff;
-    border: 1px solid #eee;
+    background: var(--color-cream);
+    border: 1px solid #f0e4a8;
 }
 
 /* ---------- Modal overlay (login/register/forgot-password/profile) ---------- */
@@ -640,11 +658,13 @@ button {
 
 .modal-card {
     background: #fff;
+    border: 2px solid var(--color-sky);
     border-radius: 10px;
     padding: 24px;
     width: 100%;
     max-width: 420px;
     box-sizing: border-box;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
 }
 
 .modal-card-wide {
@@ -1035,9 +1055,9 @@ button {
 .agent-sub-box {
     margin: 6px 0 8px 26px;
     padding: 10px 14px;
-    background: #f9f9f9;
+    background: #fff;
     border-radius: 6px;
-    border-left: 3px solid #ddd;
+    border-left: 3px solid var(--color-primary);
 }
 
 .scope-preview {
