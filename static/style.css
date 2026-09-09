@@ -104,6 +104,10 @@ input[type="checkbox"] {
     gap: 6px;
 }
 
+.answerBox_1{
+    background-color: white;
+}
+
 #askButton {
     background: var(--color-primary);
     color: #fff;
@@ -185,7 +189,7 @@ button {
     min-height: 300px;
     overflow-y: auto;
     border: 2px solid var(--color-sky-pale);
-    border-radius: 8px;
+    border-radius: 15px;
     padding: 14px;
     box-sizing: border-box;
 }
