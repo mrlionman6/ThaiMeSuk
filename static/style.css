@@ -575,9 +575,11 @@ button {
 }
 
 .side-section-label {
-    font-size: 12px;
+    font-size: 18px;
+    font-weight: bold ;
     color: black;
     margin-bottom: 8px;
+   
 }
 
 #chatHistoryList {
