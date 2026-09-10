@@ -80,10 +80,11 @@ body.chat-empty #answerBox {
    background: var(--color-primary-button-green);
    border-radius: 6px;
    font-weight: bold;
+   color: #fff;
 }
 
 .askButton_1:hover {
-    background: var(--color-primary-hover);
+    background: var(--color-primary-button-green-hover);
 }
 
 input {
