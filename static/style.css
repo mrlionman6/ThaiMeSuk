@@ -82,7 +82,9 @@ input[type="checkbox"] {
 .page-title {
     text-align: center;
     color: var(--color-cream-text);
-    background: var(--color-cream);
+    background-image: url('/static/Graphic/main_BG2.jpg');
+    background-size: contain; 
+    /*background: var(--color-cream);*/
     border-radius: 12px;
     padding: 14px 16px;
     white-space: nowrap; /* ห้ามตัดขึ้นบรรทัดใหม่แม้จอแคบ */
