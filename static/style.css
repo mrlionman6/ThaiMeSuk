@@ -109,18 +109,14 @@ input[type="checkbox"] {
 }
 
 .page-title {
-    text-align: center;
-    color: var(--color-cream-text);
-    /*background-image: url('/static/Graphic/button_1.png');
-    background-size: contain; */
-    /*background: var(--color-cream);*/
+    display: block;
+    align-self: center; /* จัดกึ่งกลางแนวนอนใน #emptyStateCenter (flex column) แทน text-align เดิมที่ใช้กับข้อความ */
+    margin: 0 auto;
     border-radius: 12px;
-    padding: 14px 16px;
-    white-space: nowrap; /* ห้ามตัดขึ้นบรรทัดใหม่แม้จอแคบ */
-    overflow: hidden;
-    /* ย่อขนาดตัวอักษรตามความกว้างจอแทนการตัดคำ กันล้นขอบจอตอนจอแคบมากๆ
-       clamp(ขั้นต่ำ, ค่าที่ปรับตาม viewport, ขั้นสูงสุด) */
-    font-size: clamp(1.1rem, 5vw, 2rem);
+    /* คงหลักการ responsive แบบเดิม (clamp) ไว้ แค่ปรับจาก font-size (ตอนเป็นข้อความ)
+       มาเป็น width (ตอนเป็นภาพ) — ย่อ/ขยายตามความกว้างจอ ไม่ล้นขอบจอตอนจอแคบ */
+    width: clamp(280px, 60vw, 650px);
+    height: auto; /* รักษาสัดส่วนภาพต้นฉบับ ไม่บิดเบี้ยว */
 }
 
 /* ให้ input+ปุ่มถาม ขยายเต็มความกว้างเท่ากล่องแชท (#answerBox) ด้านล่าง — เดิม input width:70%
