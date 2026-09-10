@@ -16,6 +16,7 @@
     --color-sky: #8CC0EB;          /* โทนฟ้ากลางตามที่ให้มาเป๊ะ — ใช้กับพื้นหลังกล่อง/เส้นขอบ ไม่ใช้กับตัวอักษรขาว (contrast ไม่พอ) */
     --color-primary: #2E75AF;      /* เข้มขึ้นจาก --color-sky เพื่อให้ตัวอักษรขาวอ่านออกผ่าน WCAG AA (4.91:1) */
     --color-primary-hover: #255F8F;
+    --color-primary-button-green: #6ABD45;
 }
 
 body.page-main-BG {
@@ -71,6 +72,12 @@ body.chat-empty #emptyStateCenter {
 
 body.chat-empty #answerBox {
     display: none; /* ซ่อนกล่องแชทว่างเปล่าทิ้งไปเลย ไม่ต้องโชว์กรอบว่างๆ */
+}
+
+
+button.askButton_1{
+   background-color: var (--color-primary-button-green);
+   border-radius: 6px;
 }
 
 input {
