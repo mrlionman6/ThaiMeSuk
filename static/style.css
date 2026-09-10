@@ -82,8 +82,8 @@ input[type="checkbox"] {
 .page-title {
     text-align: center;
     color: var(--color-cream-text);
-    background-image: url('/static/Graphic/button_1.png');
-    background-size: contain; 
+    /*background-image: url('/static/Graphic/button_1.png');
+    background-size: contain; */
     /*background: var(--color-cream);*/
     border-radius: 12px;
     padding: 14px 16px;
