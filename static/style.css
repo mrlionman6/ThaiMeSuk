@@ -526,7 +526,7 @@ button {
     left: 0;
     height: 100%;
     width: 260px;
-    background: var(--color-sky-pale);
+    background: whote;
     border-right: 2px solid var(--color-sky);
     z-index: 25;
     display: flex;
@@ -633,6 +633,9 @@ button {
 }
 
 .side-signout-btn {
+    background: var(--color-primary-button-green);
+    border-radius: 6px;
+    font-weight: bold;
     font-size: 13px;
     padding: 6px 10px;
     flex-shrink: 0;
@@ -671,6 +674,9 @@ button {
 
 /* ---------- Sidebar: ปุ่มแชทใหม่ + highlight แชทที่เปิดอยู่ ---------- */
 .side-new-chat-btn {
+    background: var(--color-primary-button-green);
+    border-radius: 6px;
+    font-weight: bold;
     width: 100%;
     margin-bottom: 14px;
     font-size: 14px;
