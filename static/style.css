@@ -63,6 +63,10 @@ body.chat-empty #emptyStateCenter {
     display: flex;
     flex-direction: column;
     justify-content: center;
+    /* เพิ่มพื้นที่ว่างเสมือนไว้ด้านล่างก่อนคำนวณกึ่งกลาง ทำให้กลุ่มเนื้อหาจริงขยับขึ้นไปทางบน
+       ประมาณครึ่งหนึ่งของค่านี้ (12vh ที่ใส่ไว้ = เนื้อหาขยับขึ้นประมาณ 6vh) ปรับตัวเลขนี้ได้อิสระ
+       ค่ามาก = ขยับขึ้นเยอะ, ค่าน้อย/ลบออก = กลับไปกึ่งกลางเป๊ะเหมือนเดิม */
+    padding-bottom: 12vh;
 }
 
 body.chat-empty #answerBox {
