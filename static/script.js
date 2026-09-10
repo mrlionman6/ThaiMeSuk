@@ -372,8 +372,8 @@ function renderUserArea() {
     } else {
         container.innerHTML = `
             <div class="side-auth-buttons">
-                <button onclick="openLoginModal()">เข้าสู่ระบบ</button>
-                <button onclick="openRegisterModal()">สมัครสมาชิก</button>
+                <button class="button_base_1" onclick="openLoginModal()">เข้าสู่ระบบ</button>
+                <button class="button_base_1" onclick="openRegisterModal()">สมัครสมาชิก</button>
             </div>
         `;
     }
