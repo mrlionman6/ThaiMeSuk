@@ -44,6 +44,22 @@ body {
     box-sizing: border-box;
 }
 
+/* ---------- สถานะแชทว่างเปล่า (ยังไม่เคยถามอะไรเลยในแชทนี้) ----------
+   จัด title + ช่องพิมพ์ให้ลอยอยู่กลางจอแนวตั้ง เหมือนหน้า "welcome" ของแชทแอปทั่วไป
+   สลับกลับเป็น layout ปกติ (บนสุด) ทันทีที่เริ่มมีข้อความแรกในแชท — ดูสถานะจาก
+   updateTitleVisibility() ใน script.js ทำงานเหมือนกันทั้ง login และ guest
+   (เช็คจาก DOM ของกล่องแชทเปล่าไหม ไม่เกี่ยวกับสถานะ login เลย) */
+body.chat-empty {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: calc(100vh - 80px); /* หัก margin บน-ล่างของ body (40px×2) ให้กึ่งกลางจอจริงๆ ไม่เพี้ยน */
+}
+
+body.chat-empty #answerBox {
+    display: none; /* ซ่อนกล่องแชทว่างเปล่าทิ้งไปเลย ไม่ต้องโชว์กรอบว่างๆ */
+}
+
 input {
     width: 70%;
     padding: 10px;
