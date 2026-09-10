@@ -226,6 +226,14 @@ input[type="checkbox"] {
     color: #c0392b;
 }
 
+.button_base_1 {
+    background: var(--color-primary-button-green);
+    border-radius: 6px;
+    border-color: white;
+    color:#fff; 
+    font-weight: bold;
+}
+
 button {
     padding: 10px 20px;
     font-size: 16px;
@@ -617,6 +625,7 @@ button {
     padding: 8px;
 }
 
+
 .side-user-info {
     display: flex;
     align-items: center;
@@ -635,6 +644,7 @@ button {
 .side-signout-btn {
     background: var(--color-primary-button-green);
     border-radius: 6px;
+    border-color: white;
     color:#fff; 
     font-weight: bold;
     font-size: 13px;
@@ -931,7 +941,7 @@ button {
     margin: 0 0 8px;
 }
 
-.danger-btn {
+.danger- {
     background: #c0392b;
     color: #fff;
     border: none;
