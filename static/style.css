@@ -635,7 +635,7 @@ button {
 .side-signout-btn {
     background: var(--color-primary-button-green);
     border-radius: 6px;
-    color:#fff
+    color:#fff; 
     font-weight: bold;
     font-size: 13px;
     padding: 6px 10px;
