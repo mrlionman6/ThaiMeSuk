@@ -79,6 +79,7 @@ body.chat-empty #answerBox {
 .askButton_1{
    background: var(--color-primary-button-green);
    border-radius: 6px;
+   border-color: white;
    font-weight: bold;
    color: #fff;
 }
@@ -175,6 +176,16 @@ input[type="checkbox"] {
 
 #attachImageBtn {
     white-space: nowrap; /* กันข้อความยาวตัดขึ้นบรรทัดใหม่จนปุ่มเสียรูป */
+   background: var(--color-primary-button-green);
+   border-color: white;
+   border-radius: 6px;
+   font-weight: bold;
+   color: #fff;
+}
+
+
+#attachImageBtn:hover {
+    background: var(--color-primary-button-green-hover);
 }
 
 /* ---------- Popup ขยายช่องพิมพ์ (ตอนพิมพ์ยาวเกินกรอบ) ---------- */
