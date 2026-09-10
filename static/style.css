@@ -19,8 +19,8 @@
 }
 
 body.page-main-BG {
-    background-image: url('/static/Graphic/main_BG2_revert.jpg');
-    /*background-image: url('/static/Graphic/main_BG2.jpg');*/
+    /*background-image: url('/static/Graphic/main_BG2_revert.jpg');*/
+    background-image: url('/static/Graphic/main_BG2.jpg');
     background-size: cover;        /* ภาพเต็มจอ ไม่บิดเบี้ยว */
     background-position: center;   /* จุดกึ่งกลางภาพอยู่ตรงกลางจอเสมอ */
     background-attachment: fixed;  /* ภาพไม่เลื่อนตามตอน scroll (ไม่บังคับ ลองดูได้) */
