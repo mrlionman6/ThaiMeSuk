@@ -26,11 +26,11 @@ body.page-main-BG {
     background-repeat: no-repeat;
 }
 
-@media (max-width: 600px) {
+/*@media (max-width: 600px) {
     body.page-main-BG {
-        background-size: 600px auto;  /* ← "limit" ที่ตั้งไว้ */
+        background-size: 600px auto;   ← "limit" ที่ตั้งไว้ 
     }
-}
+}*/
 
 body {
     font-family: sans-serif;
