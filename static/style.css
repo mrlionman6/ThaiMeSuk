@@ -76,7 +76,7 @@ body.chat-empty #answerBox {
 
 
 .askButton_1{
-   background-color: var (--color-primary-button-green);
+   background-color: var(--color-primary-button-green);
    border-radius: 6px;
 }
 
