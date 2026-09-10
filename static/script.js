@@ -233,7 +233,11 @@ function updateTitleVisibility() {
     const title = document.querySelector(".page-title");
     const box = document.getElementById("answerBox");
     if (!title || !box) return;
-    title.style.display = box.children.length === 0 ? "" : "none";
+    const isEmpty = box.children.length === 0;
+    title.style.display = isEmpty ? "" : "none";
+    // สลับ layout กลางจอ + ซ่อนกล่องแชท ตามเงื่อนไขเดียวกับ title เป๊ะ (ไม่ต้องเช็คซ้ำ)
+    // ทำงานเหมือนกันทั้ง login และ guest เพราะเช็คจาก DOM ของกล่องแชทเท่านั้น ไม่เกี่ยวกับสถานะ login
+    document.body.classList.toggle("chat-empty", isEmpty);
 }
 
 function scrollChatToBottom() {
