@@ -52,8 +52,17 @@ body {
 body.chat-empty {
     display: flex;
     flex-direction: column;
-    justify-content: center;
     min-height: calc(100vh - 80px); /* หัก margin บน-ล่างของ body (40px×2) ให้กึ่งกลางจอจริงๆ ไม่เพี้ยน */
+}
+
+/* ให้ #emptyStateCenter ยืดกินพื้นที่ที่เหลือทั้งหมด (ไม่รวม footnote ด้านล่าง) แล้วจัดกึ่งกลาง
+   "เฉพาะตัวมันเอง" ตรงนี้ — กัน footnote ที่อยู่ข้างล่างมาถ่วงจุดกึ่งกลางให้เลื่อนลงมากเกินไป
+   (ถ้าจัดกึ่งกลางทั้ง body รวม footnote ด้วย จุดกึ่งกลางจริงจะเลื่อนต่ำกว่าที่ตาเรามองว่าควรอยู่) */
+body.chat-empty #emptyStateCenter {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 body.chat-empty #answerBox {
