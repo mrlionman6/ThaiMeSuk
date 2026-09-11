@@ -18,6 +18,9 @@
     --color-primary-hover: #255F8F;
     --color-primary-button-green: #6ABD45;
     --color-primary-button-green-hover: #64C18B;
+    --color-primary-button-green-bright: #D2DE32;
+    --color-primary-button-green-bright-hover: #D2DE32;
+}
 }
 
 body.page-main-BG {
@@ -232,6 +235,10 @@ input[type="checkbox"] {
     border-color: white;
     color:#fff; 
     font-weight: bold;
+}
+
+.button_base_1:hover {
+    background: var(--color-primary-button-green-hover);
 }
 
 button {
@@ -691,7 +698,8 @@ button {
 
 /* ---------- Sidebar: ปุ่มแชทใหม่ + highlight แชทที่เปิดอยู่ ---------- */
 .side-new-chat-btn {
-    background: var(--color-primary-button-green);
+    background: var(--color-primary-button-green-bright);
+    color:#fff;
     border-radius: 6px;
     font-weight: bold;
     width: 100%;
@@ -700,6 +708,9 @@ button {
     padding: 8px;
 }
 
+.side-new-chat-btn:hover {
+   background: var(--color-primary-button-green-bright-hover)
+}
 .side-chat-active {
     background: var(--color-sky-pale);
     font-weight: bold;
