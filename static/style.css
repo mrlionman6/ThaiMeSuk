@@ -699,8 +699,9 @@ button {
 /* ---------- Sidebar: ปุ่มแชทใหม่ + highlight แชทที่เปิดอยู่ ---------- */
 .side-new-chat-btn {
     background:  var(--color-primary-button-green-bright);
-    color:#fff;
+    color: #002700;
     border-radius: 6px;
+    border-color: white;
     font-weight: bold;
     width: 100%;
     margin-bottom: 14px;
