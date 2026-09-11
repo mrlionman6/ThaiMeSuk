@@ -556,12 +556,12 @@ button {
 
 .side-top {
     display: flex;
-    align-items: left center;
+    align-items: right;
     justify-content: space-between;
     padding: 16px;
     border-bottom: 1px solid #eee;
     background-image: url('/static/Graphic/side_brand_1.png');
-    background-size: contain;        /* ภาพเต็มจอ ไม่บิดเบี้ยว */
+    background-size: cover;        /* ภาพเต็มจอ ไม่บิดเบี้ยว */
     background-position: center;   /* จุดกึ่งกลางภาพอยู่ตรงกลางจอเสมอ */
     background-attachment: fixed;  /* ภาพไม่เลื่อนตามตอน scroll (ไม่บังคับ ลองดูได้) */
     background-repeat: no-repeat;
