@@ -626,6 +626,11 @@ button {
 .side-bottom {
     border-top: 1px solid #eee;
     padding: 16px;
+    background-image: url('/static/Graphic/Tab_lower_1.jpg');
+    background-size: cover;        /* ภาพเต็มจอ ไม่บิดเบี้ยว */
+    background-position: center;   /* จุดกึ่งกลางภาพอยู่ตรงกลางจอเสมอ */
+    background-attachment: fixed;  /* ภาพไม่เลื่อนตามตอน scroll (ไม่บังคับ ลองดูได้) */
+    background-repeat: no-repeat;
 }
 
 .side-auth-buttons {
