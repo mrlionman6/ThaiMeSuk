@@ -556,7 +556,7 @@ button {
 
 .side-top {
     display: flex;
-    align-items: right;
+    align-items: center;
     justify-content: space-between;
     padding: 16px;
     border-bottom: 1px solid #eee;
@@ -578,6 +578,7 @@ button {
     border: none;
     padding: 4px 8px;
     font-size: 16px;
+    margin-left:auto;
 }
 
 /* พื้นที่รายการแชท — โตได้ตามเนื้อหาในอนาคต เลื่อนได้เองถ้ายาวเกิน */
