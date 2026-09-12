@@ -406,7 +406,7 @@ async function getSecurityQuestions() {
 // =====================================================================
 function openLoginModal() {
     openModal(`
-        <h2>เข้าสู่ระบบ</h2>
+        <h2 class="login-messenger">เข้าสู่ระบบ</h2>
         <form id="loginForm">
             <input type="text" id="loginUsername" placeholder="ชื่อผู้ใช้" required>
             <input type="password" id="loginPassword" placeholder="รหัสผ่าน" required>
