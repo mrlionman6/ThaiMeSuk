@@ -412,8 +412,8 @@ function openLoginModal() {
             <input type="password" id="loginPassword" placeholder="รหัสผ่าน" required>
             <div class="modal-error" id="loginError"></div>
             <div class="modal-buttons">
-                <button type="submit">เข้าสู่ระบบ</button>
-                <button type="button" onclick="closeModal()">ยกเลิก</button>
+                <button type="submit" class="button_base_1">เข้าสู่ระบบ</button>
+                <button type="button" class="button_base_1" onclick="closeModal()">ยกเลิก</button>
             </div>
             <p class="modal-link"><a href="#" onclick="openForgotPasswordModal(); return false;">ลืมรหัสผ่าน?</a></p>
         </form>
