@@ -775,7 +775,13 @@ button {
 }
 
 .modal-card {
-    background: #fff;
+    background-image: url("/static/Graphic/main_BG2.jpg");
+    background-size: cover;
+    background-position: center;
+    background-replace: no replace;
+    background-attachment: fixed;
+
+   
     border: 2px solid var(--color-sky);
     border-radius: 10px;
     padding: 24px;
@@ -783,6 +789,10 @@ button {
     max-width: 420px;
     box-sizing: border-box;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+}
+
+.login-massege {
+   color: white;
 }
 
 .modal-card-wide {
