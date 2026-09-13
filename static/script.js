@@ -265,7 +265,7 @@ function closeSidebar() {
 }
 
 document.getElementById("sidebarToggle").addEventListener("click", openSidebar);
-document.getElementById("sidebarClose").addEventListener("click", closeSidebar);
+/*document.getElementById("sidebarClose").addEventListener("click", closeSidebar);*/
 let sidebarMouseDownOnBackdrop = false;
 
 document.getElementById("sidebarBackdrop").addEventListener("mousedown", (e) => {
