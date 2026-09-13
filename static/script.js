@@ -17,14 +17,14 @@ function handleImageSelected() {
     if (!file) return;
 
     if (!currentUser) {
-        alert("กรุณาเข้าสู่ระบบก่อนใช้ฟีเจอร์แนบภาพ");
+        showAlertDialog("กรุณาเข้าสู่ระบบก่อนใช้ฟีเจอร์แนบภาพ");
         imageInput.value = "";
         return;
     }
 
     const maxSizeBytes = 10 * 1024 * 1024; // ต้องตรงกับ MAX_IMAGE_SIZE_BYTES ฝั่ง backend (ขยายเป็น 10MB รองรับ PDF)
     if (file.size > maxSizeBytes) {
-        alert("ไฟล์ใหญ่เกินไป (จำกัดไม่เกิน 10MB)");
+        showAlertDialog("ไฟล์ใหญ่เกินไป (จำกัดไม่เกิน 10MB)");
         imageInput.value = "";
         return;
     }
@@ -539,7 +539,7 @@ async function openRegisterModal() {
             }
 
             closeModal();
-            alert("ส่งคำขอสมัครสมาชิกเรียบร้อยแล้ว กรุณารอผู้ดูแลระบบอนุมัติก่อนเข้าสู่ระบบ");
+            showAlertDialog("ส่งคำขอสมัครสมาชิกเรียบร้อยแล้ว กรุณารอผู้ดูแลระบบอนุมัติก่อนเข้าสู่ระบบ");
         } catch (error) {
             errorEl.textContent = String(error.message || error);
         }
@@ -565,7 +565,7 @@ function refreshCaptcha() {
     preload.onerror = () => {
         spinner.hidden = true;
         btn.disabled = false;
-        alert("โหลดภาพยืนยันไม่สำเร็จ ลองใหม่อีกครั้ง");
+        showAlertDialog("โหลดภาพยืนยันไม่สำเร็จ ลองใหม่อีกครั้ง");
     };
     preload.src = "/api/auth/captcha?t=" + Date.now(); // กัน browser cache ภาพเดิม
 }
@@ -664,7 +664,7 @@ function openForgotStep2Modal() {
             forgotPasswordUsername = null;
             forgotPasswordQuestions = null;
             closeModal();
-            alert("ตั้งรหัสผ่านใหม่สำเร็จ กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่");
+            showAlertDialog("ตั้งรหัสผ่านใหม่สำเร็จ กรุณาเข้าสู่ระบบด้วยรหัสผ่านใหม่");
             openLoginModal();
         } catch (error) {
             errorEl.textContent = String(error.message || error);
@@ -796,14 +796,37 @@ function handleDeleteAccount() {
                 renderUserArea();
                 resetChatHistoryUI();
                 document.getElementById("answerBox").innerHTML = "";
-                alert("ลบบัญชีเรียบร้อยแล้ว");
+                showAlertDialog("ลบบัญชีเรียบร้อยแล้ว");
             } catch (error) {
-                alert("ลบบัญชีไม่สำเร็จ: " + error);
+                showAlertDialog("ลบบัญชีไม่สำเร็จ: " + error);
             }
         },
         { onCancel: () => openProfileModal() } // กด "ยกเลิก" กลับไปหน้าโปรไฟล์เดิม ไม่ใช่ปิด modal ทั้งหมด
-    );
+    );   
 }
+// =====================================================================
+// POP ยืนยันการขอสิทธิสมัครสมาชิก 
+// =====================================================================
+
+function showAlertDialog (message, onOk) {
+    const cb = onOk || closeModal;
+
+    openModal(`
+             <p class="confirm-dialog-message">${escapeHtml(message)}</p>
+             <div class="modal-buttons">
+                 <button type="button" id="alertDialogOkBtn" class="button_base_1"> ตกลง </button>
+            </div>
+    `)
+
+    document.getElementByID("alertDialogOkBtn").onclick = () => {
+        closeModal();
+    }
+
+    
+
+    
+}
+
 
 // =====================================================================
 // ประวัติแชท (กลาง sidebar)
@@ -869,7 +892,7 @@ async function loadChat(chatId) {
         loadChatHistory();
         closeSidebar();
     } catch (error) {
-        alert("โหลดแชทไม่สำเร็จ: " + error);
+        showAlertDialog("โหลดแชทไม่สำเร็จ: " + error);
     }
 }
 
@@ -885,7 +908,7 @@ function handleDeleteChat(chatId) {
             }
             loadChatHistory();
         } catch (error) {
-            alert("ลบแชทไม่สำเร็จ: " + error);
+            showAlertDialog("ลบแชทไม่สำเร็จ: " + error);
         }
     });
 }
