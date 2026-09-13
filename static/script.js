@@ -818,8 +818,9 @@ function showAlertDialog (message, onOk) {
             </div>
     `)
 
-    document.getElementByID("alertDialogOkBtn").onclick = () => {
+    document.getElementById("alertDialogOkBtn").onclick = () => {
         closeModal();
+        cb();
     }
 
     
