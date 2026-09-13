@@ -67,7 +67,7 @@ function openInputExpandModal() {
                   placeholder="พิมพ์คำถามเกี่ยวกับกฎหมายที่ท่านสงสัย">${escapeHtml(currentText)}</textarea>
         <div class="ask-controls">
             <button type="button" onclick="document.getElementById('imageAttachInput').click()">แนบเอกสารทางกฎหมาย</button>
-            <button onclick="submitFromExpandModal()">ถาม</button>
+            <button class="button_base_1" onclick="submitFromExpandModal()">ถาม</button>
         </div>
     `, "modal-card-wide");
 
@@ -490,8 +490,8 @@ async function openRegisterModal() {
 
             <div class="modal-error" id="registerError"></div>
             <div class="modal-buttons">
-                <button type="submit">ส่งคำขอสมัคร</button>
-                <button type="button" onclick="closeModal()">ยกเลิก</button>
+                <button type="submit" class="button_base_1" >ส่งคำขอสมัคร</button>
+                <button type="button" class="button_base_1" onclick="closeModal()">ยกเลิก</button>
             </div>
         </form>
     `);
@@ -636,8 +636,8 @@ function openForgotStep2Modal() {
             <input type="password" id="forgotNewPassword" placeholder="รหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)" required minlength="8">
             <div class="modal-error" id="forgotStep2Error"></div>
             <div class="modal-buttons">
-                <button type="submit">ตั้งรหัสผ่านใหม่</button>
-                <button type="button" onclick="closeModal()">ยกเลิก</button>
+                <button class="button_base_1" type="submit">ตั้งรหัสผ่านใหม่</button>
+                <button class="button_base_1" type="button" onclick="closeModal()">ยกเลิก</button>
             </div>
         </form>
     `);
@@ -683,7 +683,7 @@ function openProfileModal() {
         <div class="profile-section">
             <p class="modal-section-label">ชื่อเล่น</p>
             <input type="text" id="profileNickname" value="${escapeHtml(currentUser.nickname || "")}">
-            <button onclick="handleUpdateNickname()">บันทึกชื่อเล่น</button>
+            <button class="button_base_1" onclick="handleUpdateNickname()">บันทึกชื่อเล่น</button>
             <span id="nicknameStatus" class="modal-status"></span>
         </div>
 
@@ -691,7 +691,7 @@ function openProfileModal() {
             <p class="modal-section-label">เปลี่ยนรหัสผ่าน</p>
             <input type="password" id="currentPassword" placeholder="รหัสผ่านปัจจุบัน">
             <input type="password" id="newPassword" placeholder="รหัสผ่านใหม่ (อย่างน้อย 8 ตัวอักษร)">
-            <button onclick="handleChangePassword()">เปลี่ยนรหัสผ่าน</button>
+            <button class="button_base_1" onclick="handleChangePassword()">เปลี่ยนรหัสผ่าน</button>
             <span id="passwordStatus" class="modal-status"></span>
         </div>
 
@@ -704,7 +704,7 @@ function openProfileModal() {
         </div>
 
         <div class="modal-buttons">
-            <button type="button" onclick="closeModal()">ปิด</button>
+            <button class="button_base_1" type="button" onclick="closeModal()">ปิด</button>
         </div>
     `);
 }
