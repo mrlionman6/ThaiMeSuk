@@ -594,8 +594,8 @@ function openForgotPasswordModal() {
             <input type="text" id="forgotUsername" placeholder="ชื่อผู้ใช้ที่ใช้สมัคร" required>
             <div class="modal-error" id="forgotStep1Error"></div>
             <div class="modal-buttons">
-                <button type="submit">ถัดไป</button>
-                <button type="button" onclick="closeModal()">ยกเลิก</button>
+                <button type="submit" class="button_base_1">ถัดไป</button>
+                <button type="button" class="button_base_1" onclick="closeModal()">ยกเลิก</button>
             </div>
         </form>
     `);
